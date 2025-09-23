@@ -24,7 +24,7 @@ module.exports = {
   },
   networks: {
     ethereum: {
-      url: process.env.ETH_RPC || "",
+      url: process.env.ETHEREUM_RPC || "",
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
       gasLimit: 2e9,
@@ -305,7 +305,7 @@ module.exports = {
         chainId: 1,
         urls: {
           apiURL: "https://api.etherscan.io/api",
-          browserURL: process.env['ETH_EXPLORER_URL']
+          browserURL: process.env['ETHEREUM_EXPLORER_URL']
         }
       },
       {
