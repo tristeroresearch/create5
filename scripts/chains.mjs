@@ -3416,13 +3416,13 @@ export const chainConfig = {
         ],
         defaultRpcUrlIndex: 0,
         addresses: {
-            tokenMessenger: '0x0000000000000000000000000000000000000000',
-            messageTransmitter: '0x0000000000000000000000000000000000000000',
-            usdc: '0x0000000000000000000000000000000000000000',
-            permit2: '0x0000000000000000000000000000000000000000',
-            entryPoint: '0x0000000000000000000000000000000000000000', // 0x4337 not deployed (verify before using)
+            tokenMessenger: '0x28b5a0e9C621a5BadaA536219b3a228C8168cf5d',
+            messageTransmitter: '0x81D40F21F12A8F0E3252Bccb954D722d4c464B64',
+            usdc: '0x222365EF19F7947e5484218551B56bb3965Aa7aF',
+            permit2: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
+            entryPoint: '0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108', // 0x4337 not deployed (verify before using)
             trustedForwarder: '0x0000000000000000000000000000000000000000',
-            multicall: '0x0000000000000000000000000000000000000000',
+            multicall: '0xF5042e6ffaC5a625D4E7848e0b01373D8eB9e222',
         },
     },
 

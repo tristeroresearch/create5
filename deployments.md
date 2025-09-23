@@ -29,6 +29,7 @@ opBNB Mainnet | 204 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://opbnb
 Optimism | 10 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://optimistic.etherscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Polygon | 137 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://polygonscan.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Polygon zkEVM | 1101 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://zkevm.polygonscan.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
+Plume | 98866 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://phoenix-explorer.plumenetwork.xyz/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Rari | 1380012617 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://mainnet.explorer.rarichain.org/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Scroll | 534352 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://scrollscan.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Sei | 1329 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://seitrace.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)

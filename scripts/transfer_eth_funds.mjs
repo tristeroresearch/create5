@@ -13,7 +13,7 @@ const confirmAction = (t) => {
 
 // Wallet sources (same pattern as other scripts)
 const ENCRYPTED_WALLET = process.env.ENCRYPTED_WALLET ? JSON.parse(process.env.ENCRYPTED_WALLET) : null;
-const RAW_PRIVATE_KEY = process.env.RUNTIME_DEPLOYER_PRIVKEY || null;
+const RAW_PRIVATE_KEY = process.env.PRIVATE_KEY || null;
 
 let useEncryptedWallet = false;
 let usePrivateKey = false;
@@ -32,7 +32,7 @@ if (ENCRYPTED_WALLET && RAW_PRIVATE_KEY) {
 }
 
 // Optional: specify exact chain keys here; leave empty array to use all configured chains
-const SELECTED_CHAIN_KEYS = ['ethereum', 'arbitrum_one', 'avalanche', 'optimism', 'base', 'polygon', 'linea', 'sonic', 'sei', 'unichain'];
+const SELECTED_CHAIN_KEYS = ['base', 'arbitrum_nova', 'abstract', 'zksync_era'];
 const SOURCE_CHAINS = SELECTED_CHAIN_KEYS.length
   ? getChainsByKeys(SELECTED_CHAIN_KEYS, { requireRpc: true })
   : configuredChains();
