@@ -1,0 +1,11 @@
+node_modules
+.DS_Store
+__pycache__
+.env
+cache
+artifacts
+cache_forge/
+out/
+deployments.log
+deployments.cache.json
+verify.sh
