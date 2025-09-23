@@ -36,7 +36,7 @@ module.exports = {
       gasLimit: 2e9,
     },
     arbitrum_one: {
-      url: process.env.ARBITRUM_RPC || "",
+      url: process.env.ARBITRUM_ONE_RPC || "",
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
       gasLimit: 2e9,
@@ -132,7 +132,7 @@ module.exports = {
       gasLimit: 2e9,
     },
     apechain: {
-      url: process.env.APE_RPC || "",
+      url: process.env.APECHAIN_RPC || "",
       accounts:
         process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
       gasLimit: 2e9,
@@ -321,7 +321,7 @@ module.exports = {
         chainId: 42161,
         urls: {
           apiURL: "https://api.arbiscan.io/api",
-          browserURL: process.env['ARBITRUM_EXPLORER_URL']
+          browserURL: process.env['ARBITRUM_ONE_EXPLORER_URL']
         }
       },
       {
@@ -425,7 +425,7 @@ module.exports = {
         chainId: 33139,
         urls: {
           apiURL: "https://api.apescan.io/api",
-          browserURL: process.env['APE_EXPLORER_URL']
+          browserURL: process.env['APECHAIN_EXPLORER_URL']
         }
       },
       {
