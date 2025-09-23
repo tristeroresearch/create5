@@ -21,6 +21,6 @@
 
 Salt mining for vanity addresses is straightforward, there is a [rust tool](https://github.com/dnnagy/wallet_search) available.
 
-# Deployment
+# Deployments
 
 See [deployments.md](deployments.md).
