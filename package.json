@@ -23,6 +23,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "@nktkas/hyperliquid": "^0.25.1",
     "@openzeppelin/contracts": "^5.1.0",
     "bcrypt": "^5.1.1",
     "crypto": "^1.0.1",
@@ -30,6 +31,7 @@
     "getpass": "^0.1.7",
     "prompt-sync": "^4.2.0",
     "smart-contract-downloader": "^1.0.5",
+    "viem": "^2.37.9",
     "yargs": "^17.7.2"
   }
 }

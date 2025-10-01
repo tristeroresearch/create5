@@ -13,6 +13,7 @@ Codex | 81224 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.co
 Cronos | 25 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.cronos.org/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Cyber | 7560 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://cyber-explorer.alt.technology/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Ethereum | 1 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://etherscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
+HyperEVM | 999 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://hyperevmscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Ink | 57073 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.inkonchain.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Injective EVM | 2525 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://inevm.calderaexplorer.xyz/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Katana Mainnet | 747474 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://katanascan.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)

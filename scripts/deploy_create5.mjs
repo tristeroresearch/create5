@@ -8,6 +8,9 @@ import { decrypt_mnemonic } from './wallet_manager.mjs';
 import { configuredChains, getRpcUrl, getChainsByKeys, chainConfig } from './chains.mjs';
 import yargs from 'yargs/yargs';
 import { hideBin } from 'yargs/helpers';
+// HyperEVM L1 action signing deps
+import { signL1Action } from '@nktkas/hyperliquid/signing';
+import { privateKeyToAccount } from 'viem/accounts';
 
 // ---------- Constants ----------
 const CONTRACT_NAME = 'Create5';
@@ -186,6 +189,7 @@ function getChainByKeyStrict(key) {
 // ---------- Wallet selection ----------
 const ENCRYPTED_WALLET = process.env.ENCRYPTED_WALLET ? JSON.parse(process.env.ENCRYPTED_WALLET) : null;
 const RAW_PRIVATE_KEY = process.env.PRIVATE_KEY || null;
+const HL_API_PRIV = process.env.HYPERCORE_API_PRIVKEY || null;
 
 async function getWalletForProvider(provider) {
     if (ENCRYPTED_WALLET) {
@@ -196,8 +200,106 @@ async function getWalletForProvider(provider) {
     throw new Error('No wallet configured. Set PRIVATE_KEY or ENCRYPTED_WALLET');
 }
 
+// ---------- HyperEVM helpers ----------
+async function callRpc(provider, method, params = []) {
+    return provider.send(method, params);
+}
+
+async function isUsingBigBlocks(provider, address) {
+    try {
+        const res = await callRpc(provider, 'eth_usingBigBlocks', [address]);
+        return !!res;
+    } catch {
+        try {
+            const res = await callRpc(provider, 'usingBigBlocks', [address]);
+            return !!res;
+        } catch {
+            return false;
+        }
+    }
+}
+
+async function getBigBlockGasPrice(provider) {
+    try {
+        const hex = await callRpc(provider, 'eth_bigBlockGasPrice', []);
+        return ethers.BigNumber.from(hex);
+    } catch {
+        const hex = await callRpc(provider, 'eth_gasPrice', []);
+        return ethers.BigNumber.from(hex);
+    }
+}
+
+function normalizeHexPrivateKey(key) {
+    if (!key || typeof key !== 'string') throw new Error('Private key must be a string');
+    let k = key.trim();
+    if (!k.startsWith('0x')) k = '0x' + k;
+    const re = /^0x[0-9a-fA-F]{64}$/;
+    if (!re.test(k)) throw new Error('Private key must be a 32-byte hex string (0x-prefixed)');
+    return k.toLowerCase();
+}
+
+async function postJson(url, bodyObj) {
+    return new Promise((resolve, reject) => {
+        const data = Buffer.from(JSON.stringify(bodyObj));
+        const u = new URL(url);
+        const req = https.request({
+            hostname: u.hostname,
+            path: u.pathname,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': data.length },
+        }, (res) => {
+            let body = '';
+            res.setEncoding('utf8');
+            res.on('data', (c) => { body += c; });
+            res.on('end', () => resolve({ statusCode: res.statusCode, body }));
+        });
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+    });
+}
+
+async function enableHyperEvmBigBlocksOrExplain({ targetEvmAddress, signerPriv }) {
+    const pk = normalizeHexPrivateKey(signerPriv);
+    const wallet = privateKeyToAccount(pk);
+    const action = { type: 'evmUserModify', usingBigBlocks: true };
+    const nonce = Date.now();
+    const signature = await signL1Action({ wallet, action, nonce });
+    const { statusCode, body } = await postJson('https://api.hyperliquid.xyz/exchange', { action, signature, nonce });
+    let parsed;
+    try { parsed = JSON.parse(body); } catch { parsed = { status: 'err', response: body }; }
+    if (statusCode < 200 || statusCode >= 300 || parsed.status !== 'ok') {
+        const msg = String(parsed.response || body || 'unknown');
+        if (/does not exist/i.test(msg)) {
+            throw new Error('Core user not found. Deposit to HyperCORE or set HYPERCORE_API_PRIVKEY for API wallet.');
+        }
+        throw new Error(`Big Blocks toggle failed: ${msg}`);
+    }
+    return true;
+}
+
+async function tryEnableBigBlocksWithPoll({ provider, evmAddress }) {
+    const signerPriv = HL_API_PRIV || RAW_PRIVATE_KEY;
+    try {
+        await enableHyperEvmBigBlocksOrExplain({ targetEvmAddress: evmAddress, signerPriv });
+    } catch (e) {
+        console.log(`[HyperEVM] Toggle attempt failed: ${e?.message || e}`);
+        return false;
+    }
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+        await sleep(1500);
+        if (await isUsingBigBlocks(provider, evmAddress)) return true;
+    }
+    return false;
+}
+
 // ---------- Gas helpers ----------
-async function normalizeGasOverrides(provider, overrides = {}) {
+async function normalizeGasOverrides(provider, overrides = {}, { isHyperEvmBig } = {}) {
+    if (isHyperEvmBig) {
+        const price = await getBigBlockGasPrice(provider);
+        return { gasPrice: price };
+    }
     let feeData; try { feeData = await provider.getFeeData(); } catch { feeData = {}; }
     let baseFee = null; try { const b = await provider.getBlock('latest'); baseFee = b && b.baseFeePerGas ? b.baseFeePerGas : null; } catch { }
     const tip = overrides.maxPriorityFeePerGas || feeData.maxPriorityFeePerGas || (ethers.utils.parseUnits ? ethers.utils.parseUnits('2', 'gwei') : ethers.BigNumber.from('2000000000'));
@@ -213,23 +315,23 @@ async function normalizeGasOverrides(provider, overrides = {}) {
     }
 }
 
-async function estimateDeployCost(wallet, deployTx, provider, gasOverrides = {}, bytecodeHex) {
+async function estimateDeployCost(wallet, deployTx, provider, gasOverrides = {}, bytecodeHex, hyperOpts = {}) {
     const gasLimit = await wallet.estimateGas({ ...deployTx });
     let depositGas = ethers.BigNumber.from(0);
     if (bytecodeHex && bytecodeHex.startsWith('0x')) {
         const byteLen = Math.floor((bytecodeHex.length - 2) / 2);
         depositGas = ethers.BigNumber.from(byteLen).mul(200);
     }
-    const norm = await normalizeGasOverrides(provider, gasOverrides);
+    const norm = await normalizeGasOverrides(provider, gasOverrides, hyperOpts);
     const price = norm.maxFeePerGas || norm.gasPrice;
     const gasLimitBuffered = gasLimit.mul(180).div(100); // +80%
     const cost = gasLimitBuffered.mul(price);
     return { gasLimit, gasLimitBuffered, price, cost, depositGas };
 }
 
-async function estimateTestDeployCost(provider, wallet, gasOverrides = {}) {
+async function estimateTestDeployCost(provider, wallet, gasOverrides = {}, hyperOpts = {}) {
     const gasLimit = await provider.estimateGas({ from: wallet.address, data: TEST_BYTECODE });
-    const norm = await normalizeGasOverrides(provider, gasOverrides);
+    const norm = await normalizeGasOverrides(provider, gasOverrides, hyperOpts);
     const price = norm.maxFeePerGas || norm.gasPrice;
     const gasLimitBuffered = gasLimit.mul(150).div(100);
     const cost = gasLimitBuffered.mul(price);
@@ -246,9 +348,9 @@ async function fetchGasZipCalldata(depositChainId, depositWei, outboundChainIds,
     return data.calldata;
 }
 
-async function estimateTxFee(provider, from, to, valueWei, overrides = {}) {
+async function estimateTxFee(provider, from, to, valueWei, overrides = {}, hyperOpts = {}) {
     const gasLimit = await provider.estimateGas({ to, from, value: valueWei });
-    const norm = await normalizeGasOverrides(provider, overrides);
+    const norm = await normalizeGasOverrides(provider, overrides, hyperOpts);
     const price = norm.maxFeePerGas || norm.gasPrice;
     const gasLimitBuffered = gasLimit.mul(120).div(100);
     const cost = gasLimitBuffered.mul(price);
@@ -260,6 +362,7 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     const provider = new ethers.providers.JsonRpcProvider({ url: chain.rpc, timeout: 600000 });
     const wallet = await getWalletForProvider(provider);
     const nonce = await provider.getTransactionCount(wallet.address, 'pending');
+    const isHyper = chain.key === 'hyperevm';
     const isDry = !!argv['dry-run'];
     const dwtGlobal = !!argv['deploy-without-test'];
     const dwtSet = parseListToSet(argv['deploy-without-test-for']);
@@ -277,10 +380,10 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     }
 
     // Estimate test cost and Create5 deploy cost
-    const testEst = await estimateTestDeployCost(provider, wallet, chain.gasOverrides || {});
+    const testEst = await estimateTestDeployCost(provider, wallet, chain.gasOverrides || {}, { isHyperEvmBig: isHyper });
     const Factory = (await hardhat.ethers.getContractFactory(CONTRACT_NAME)).connect(wallet);
     const deployTx = await Factory.getDeployTransaction();
-    const est = await estimateDeployCost(wallet, deployTx, provider, chain.gasOverrides || {}, Factory.bytecode);
+    const est = await estimateDeployCost(wallet, deployTx, provider, chain.gasOverrides || {}, Factory.bytecode, { isHyperEvmBig: isHyper });
 
     const priceInfo = gasZipPricesMap.get(chain.chainId);
     if (!priceInfo || typeof priceInfo.price !== 'number') throw new Error(`Missing gas.zip price for chainId ${chain.chainId}`);
@@ -364,7 +467,7 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     }
 
     // Test deploy (only when not skipping)
-    const overrides = await normalizeGasOverrides(provider, chain.gasOverrides || {});
+    const overrides = await normalizeGasOverrides(provider, chain.gasOverrides || {}, { isHyperEvmBig: isHyper });
     if (!(nonce !== 0 && allowSkipTest)) {
         const testTx = await wallet.sendTransaction({ data: TEST_BYTECODE, ...overrides });
         const testRcpt = await testTx.wait(1);
@@ -373,7 +476,7 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     }
 
     // Factory deploy (nonce 1)
-    const factoryOverrides = await normalizeGasOverrides(provider, chain.gasOverrides || {});
+    const factoryOverrides = await normalizeGasOverrides(provider, chain.gasOverrides || {}, { isHyperEvmBig: isHyper });
     // Preflight: estimate gas for deploy tx now to ensure it will not OOG; abort if estimation fails
     let preflightGas;
     try {
@@ -415,14 +518,14 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
         const ninetyNine = afterBal.mul(9900).div(10000);
         let amountToSend = ethers.BigNumber.from(0);
         try {
-            const feeEst2 = await estimateTxFee(provider, wallet.address, DIRECT_FORWARDER, ninetyNine, chain.gasOverrides || {});
+            const feeEst2 = await estimateTxFee(provider, wallet.address, DIRECT_FORWARDER, ninetyNine, chain.gasOverrides || {}, { isHyperEvmBig: isHyper });
             amountToSend = ninetyNine.sub(feeEst2.cost);
         } catch (e) {
             logLine({ level: 'warn', action: 'refund_calc_failed', chain: chain.key, error: e?.message || String(e) });
         }
         try {
             if (amountToSend.gt(0)) {
-                const ov = await normalizeGasOverrides(provider, chain.gasOverrides || {});
+                const ov = await normalizeGasOverrides(provider, chain.gasOverrides || {}, { isHyperEvmBig: isHyper });
                 const refundTx = await wallet.sendTransaction({ to: DIRECT_FORWARDER, data: (await fetchGasZipCalldata(chain.chainId, amountToSend, [sourceCtx.chain.chainId], sourceCtx.wallet.address, wallet.address)), value: amountToSend, ...ov });
                 const rcpt = await refundTx.wait(1);
                 const priceInfo2 = gasZipPricesMap.get(chain.chainId);
@@ -451,6 +554,7 @@ async function main() {
         logLine({ level: 'warn', step: 'compile', error: e?.message || String(e) });
     }
     const chainsAll = configuredChainsStrict();
+    const hasHyper = chainsAll.some(c => c.key === 'hyperevm');
     const sourceChain = getChainByKeyStrict(SOURCE_CHAIN_KEY);
     const onlySet = parseListToSet(argv.only);
     if (onlySet && onlySet.size > 0) {
@@ -468,6 +572,23 @@ async function main() {
 
     // Fetch gas.zip price table
     const gasZipMap = await fetchGasZipChains();
+
+    // HyperEVM preflight: try enable Big Blocks for deployer (no nonce impact)
+    if (hasHyper) {
+        const hyper = getChainByKeyStrict('hyperevm');
+        const hyperProvider = new ethers.providers.JsonRpcProvider({ url: hyper.rpc, timeout: 600000 });
+        const hyperWallet = await getWalletForProvider(hyperProvider);
+        console.log('[HyperEVM] Checking Big Blocks flag…');
+        const already = await isUsingBigBlocks(hyperProvider, hyperWallet.address);
+        if (already) {
+            console.log('[HyperEVM] Big Blocks already enabled for', hyperWallet.address);
+        } else {
+            console.log('[HyperEVM] Attempting to enable Big Blocks for', hyperWallet.address);
+            const ok = await tryEnableBigBlocksWithPoll({ provider: hyperProvider, evmAddress: hyperWallet.address });
+            console.log(`[HyperEVM] user flag = ${ok ? 'ON' : 'OFF (will force big-block via gasPrice)'}`);
+        }
+        console.log('[HyperEVM] Note: You can toggle manually at https://hyperevm-block-toggle.vercel.app/');
+    }
 
     // Step 1: Optionally deploy to Arbitrum (source) first when selected or when no filter provided
     let didSource = false;
