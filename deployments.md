@@ -16,6 +16,7 @@ Ethereum | 1 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://etherscan.io
 HyperEVM | 999 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://hyperevmscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Ink | 57073 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.inkonchain.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Injective EVM | 2525 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://inevm.calderaexplorer.xyz/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
+Injective Mainnet | 1776 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://blockscout.injective.network/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Katana Mainnet | 747474 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://katanascan.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 KCC | 321 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://scan.kcc.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Linea | 59144 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://lineascan.build/address/0x7000000db505d50f077492Efa36a8968ff7493dD)

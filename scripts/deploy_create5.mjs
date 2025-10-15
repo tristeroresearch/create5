@@ -385,10 +385,29 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     const deployTx = await Factory.getDeployTransaction();
     const est = await estimateDeployCost(wallet, deployTx, provider, chain.gasOverrides || {}, Factory.bytecode, { isHyperEvmBig: isHyper });
 
+    // Decide funding/refund policy early to determine if we need gas.zip prices
+    const skipFundingGlobal = !!argv['skip-funding'];
+    const skipFundingFor = parseListToSet(argv['skip-funding-for']);
+    const shouldSkipFunding = skipFundingGlobal || (skipFundingFor && skipFundingFor.has(chain.key));
+    const skipRefund = !!argv['skip-refund'];
+
+    // Get gas.zip prices (optional if both funding and refund are skipped)
     const priceInfo = gasZipPricesMap.get(chain.chainId);
-    if (!priceInfo || typeof priceInfo.price !== 'number') throw new Error(`Missing gas.zip price for chainId ${chain.chainId}`);
     const srcPrice = gasZipPricesMap.get(sourceCtx.chain.chainId);
-    if (!srcPrice || typeof srcPrice.price !== 'number') throw new Error('Missing gas.zip price for source chain');
+    
+    // Only require gas.zip prices if we're actually going to use them for funding/refund
+    if (!shouldSkipFunding) {
+        if (!priceInfo || typeof priceInfo.price !== 'number') {
+            throw new Error(`Missing gas.zip price for chainId ${chain.chainId}. Chain may not be supported by gas.zip. Use --skip-funding --skip-refund for manual funding.`);
+        }
+        if (!srcPrice || typeof srcPrice.price !== 'number') {
+            throw new Error('Missing gas.zip price for source chain');
+        }
+    }
+    
+    if (!skipRefund && (!priceInfo || typeof priceInfo.price !== 'number')) {
+        throw new Error(`Missing gas.zip price for chainId ${chain.chainId}. Chain may not be supported by gas.zip. Use --skip-refund to skip refund.`);
+    }
 
     // Required destination native amount (destination chain native):
     // Default: 2x deploy + 1x test; Ethereum L1 (chainId=1): 3x deploy + 1x test (more conservative)
@@ -397,9 +416,14 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     const requiredDestWei = est.cost.mul(deployMult).add(testEst.cost.mul(testMult));
     logLine({ level: 'info', step: 'fund_sizing', chain: chain.key, chainId: chain.chainId, deployMult, testMult, estDeployGas: est.gasLimit.toString(), estDeployCostEth: utils.formatEther(est.cost), estTestGas: testEst.gasLimit.toString(), estTestCostEth: utils.formatEther(testEst.cost) });
 
-    const requiredUsd = Number(utils.formatEther(requiredDestWei)) * priceInfo.price;
-    const srcEthNeeded = requiredUsd / srcPrice.price; // in native ETH (float)
-    const srcWeiNeeded = utils.parseEther(srcEthNeeded.toFixed(18));
+    let requiredUsd = 0;
+    let srcEthNeeded = 0;
+    let srcWeiNeeded = ethers.BigNumber.from(0);
+    if (priceInfo && srcPrice && priceInfo.price && srcPrice.price) {
+        requiredUsd = Number(utils.formatEther(requiredDestWei)) * priceInfo.price;
+        srcEthNeeded = requiredUsd / srcPrice.price; // in native ETH (float)
+        srcWeiNeeded = utils.parseEther(srcEthNeeded.toFixed(18));
+    }
 
     // Dry-run: report requirements vs. current destination balance and exit early
     if (isDry) {
@@ -422,23 +446,20 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
             estTestCostEth: utils.formatEther(testEst.cost),
             requiredWei: requiredDestWei.toString(),
             requiredEth,
-            requiredUsd: (Number(requiredEth) * priceInfo.price).toFixed(6),
+            requiredUsd: priceInfo?.price ? (Number(requiredEth) * priceInfo.price).toFixed(6) : 'N/A',
             currentWei: destBal.toString(),
             currentEth,
-            currentUsd: (Number(currentEth) * priceInfo.price).toFixed(6),
+            currentUsd: priceInfo?.price ? (Number(currentEth) * priceInfo.price).toFixed(6) : 'N/A',
             enough,
             shortfallWei: shortfall.toString(),
             shortfallEth,
-            shortfallUsd: (Number(shortfallEth) * priceInfo.price).toFixed(6),
+            shortfallUsd: priceInfo?.price ? (Number(shortfallEth) * priceInfo.price).toFixed(6) : 'N/A',
         };
         logLine(summary);
         return { dry: true, enough };
     }
 
-    // Decide funding policy (allow manual direct funding)
-    const skipFundingGlobal = !!argv['skip-funding'];
-    const skipFundingFor = parseListToSet(argv['skip-funding-for']);
-    const shouldSkipFunding = skipFundingGlobal || (skipFundingFor && skipFundingFor.has(chain.key));
+    // Execute funding if not skipped
     let didFund = false;
     if (shouldSkipFunding) {
         logLine({ level: 'info', step: 'skip_fund', chain: chain.key, reason: skipFundingGlobal ? 'skip_funding_flag' : 'skip_funding_for' });
@@ -472,7 +493,7 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
         const testTx = await wallet.sendTransaction({ data: TEST_BYTECODE, ...overrides });
         const testRcpt = await testTx.wait(1);
         const testCostWei = testRcpt.gasUsed.mul(testRcpt.effectiveGasPrice || overrides.maxFeePerGas || overrides.gasPrice);
-        logLine({ level: 'info', action: 'test_deploy', chain: chain.key, tx: testTx.hash, link: `${chain.explorer}/tx/${testTx.hash}`, gasUsed: testRcpt.gasUsed.toString(), costEth: formatEth(testCostWei), costUsd: (Number(formatEth(testCostWei)) * priceInfo.price).toFixed(6) });
+        logLine({ level: 'info', action: 'test_deploy', chain: chain.key, tx: testTx.hash, link: `${chain.explorer}/tx/${testTx.hash}`, gasUsed: testRcpt.gasUsed.toString(), costEth: formatEth(testCostWei), costUsd: priceInfo?.price ? (Number(formatEth(testCostWei)) * priceInfo.price).toFixed(6) : 'N/A' });
     }
 
     // Factory deploy (nonce 1)
@@ -490,7 +511,7 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     const deployRcpt = await contract.deployTransaction.wait(1);
     const gasPriceUsed = deployRcpt.effectiveGasPrice || factoryOverrides.maxFeePerGas || factoryOverrides.gasPrice;
     const deployCostWei = deployRcpt.gasUsed.mul(gasPriceUsed);
-    logLine({ level: 'info', action: 'deploy', chain: chain.key, address: contract.address, link: `${chain.explorer}/address/${contract.address}`, tx: deployRcpt.transactionHash, txLink: `${chain.explorer}/tx/${deployRcpt.transactionHash}`, gasUsed: deployRcpt.gasUsed.toString(), costEth: formatEth(deployCostWei), costUsd: (Number(formatEth(deployCostWei)) * priceInfo.price).toFixed(6) });
+    logLine({ level: 'info', action: 'deploy', chain: chain.key, address: contract.address, link: `${chain.explorer}/address/${contract.address}`, tx: deployRcpt.transactionHash, txLink: `${chain.explorer}/tx/${deployRcpt.transactionHash}`, gasUsed: deployRcpt.gasUsed.toString(), costEth: formatEth(deployCostWei), costUsd: priceInfo?.price ? (Number(formatEth(deployCostWei)) * priceInfo.price).toFixed(6) : 'N/A' });
 
     appendDeploymentRow(chain.display, chain.chainId, chain.explorer, contract.address);
 
@@ -510,7 +531,6 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     writeCache(cache);
 
     // Optional refund of remaining balance back to source
-    const skipRefund = !!argv['skip-refund'];
     if (skipRefund) {
         logLine({ level: 'info', step: 'skip_refund', chain: chain.key });
     } else {

@@ -14,25 +14,43 @@ const confirmAction = (t) => {
 // Wallet sources (same pattern as other scripts)
 const ENCRYPTED_WALLET = process.env.ENCRYPTED_WALLET ? JSON.parse(process.env.ENCRYPTED_WALLET) : null;
 const RAW_PRIVATE_KEY = process.env.PRIVATE_KEY || null;
+const METAMASK_PRIVATE_KEY = process.env.METAMASK_PRIVATE_KEY || null;
 
 let useEncryptedWallet = false;
 let usePrivateKey = false;
+let useMetamaskPrivateKey = false;
 
-if (!ENCRYPTED_WALLET && !RAW_PRIVATE_KEY) {
-    throw new Error("No wallet configuration provided. Please specify either ENCRYPTED_WALLET or RUNTIME_DEPLOYER_PRIVKEY in your .env file.");
+if (!ENCRYPTED_WALLET && !RAW_PRIVATE_KEY && !METAMASK_PRIVATE_KEY) {
+    throw new Error("No wallet configuration provided. Please specify either ENCRYPTED_WALLET, PRIVATE_KEY, or METAMASK_PRIVATE_KEY in your .env file.");
 }
 
-if (ENCRYPTED_WALLET && RAW_PRIVATE_KEY) {
-    console.log("Both encrypted wallet and private key are configured in your .env file.");
-    useEncryptedWallet = confirmAction("Would you like to use the encrypted wallet? (Y/N): ");
-    usePrivateKey = !useEncryptedWallet;
+// Determine which wallet source to use
+const availableSources = [];
+if (ENCRYPTED_WALLET) availableSources.push('ENCRYPTED_WALLET');
+if (RAW_PRIVATE_KEY) availableSources.push('PRIVATE_KEY');
+if (METAMASK_PRIVATE_KEY) availableSources.push('METAMASK_PRIVATE_KEY');
+
+if (availableSources.length > 1) {
+    console.log(`Multiple wallet sources are configured: ${availableSources.join(', ')}`);
+    if (ENCRYPTED_WALLET) {
+        useEncryptedWallet = confirmAction("Would you like to use the ENCRYPTED_WALLET? (Y/N): ");
+    }
+    if (!useEncryptedWallet && RAW_PRIVATE_KEY && METAMASK_PRIVATE_KEY) {
+        usePrivateKey = confirmAction("Would you like to use PRIVATE_KEY? (Y for PRIVATE_KEY, N for METAMASK_PRIVATE_KEY): ");
+        useMetamaskPrivateKey = !usePrivateKey;
+    } else if (!useEncryptedWallet && RAW_PRIVATE_KEY) {
+        usePrivateKey = true;
+    } else if (!useEncryptedWallet && METAMASK_PRIVATE_KEY) {
+        useMetamaskPrivateKey = true;
+    }
 } else {
     useEncryptedWallet = !!ENCRYPTED_WALLET;
     usePrivateKey = !!RAW_PRIVATE_KEY;
+    useMetamaskPrivateKey = !!METAMASK_PRIVATE_KEY;
 }
 
 // Optional: specify exact chain keys here; leave empty array to use all configured chains
-const SELECTED_CHAIN_KEYS = ['base', 'arbitrum_nova', 'abstract', 'zksync_era'];
+const SELECTED_CHAIN_KEYS = ['injevm'];
 const SOURCE_CHAINS = SELECTED_CHAIN_KEYS.length
   ? getChainsByKeys(SELECTED_CHAIN_KEYS, { requireRpc: true })
   : configuredChains();
@@ -79,6 +97,7 @@ const getWalletForProvider = async (provider) => {
         return wallet.connect(provider);
     }
     if (usePrivateKey) return new Wallet(RAW_PRIVATE_KEY, provider);
+    if (useMetamaskPrivateKey) return new Wallet(METAMASK_PRIVATE_KEY, provider);
     throw new Error("No wallet available");
 };
 
