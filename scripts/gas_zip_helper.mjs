@@ -3,7 +3,9 @@ import 'dotenv/config';
 import PromptSync from 'prompt-sync';
 import { Wallet, ethers, utils } from 'ethers';
 import { decrypt_mnemonic } from './wallet_manager.mjs';
-import { configuredChains, getRpcUrl, getChainsByKeys } from './chains.mjs';
+import { configuredChains, getRpcUrl, getChainsByKeys, chainConfig } from '../chainconfig/chains.mjs';
+import yargs from 'yargs/yargs';
+import { hideBin } from 'yargs/helpers';
 import https from 'https';
 
 const prompt = PromptSync();
@@ -56,7 +58,7 @@ function buildPerChainConfig() {
 
 // Wallet sources: prioritize private key per user requirement; also support encrypted wallet like other scripts
 const ENCRYPTED_WALLET = process.env.ENCRYPTED_WALLET ? JSON.parse(process.env.ENCRYPTED_WALLET) : null;
-const RAW_PRIVATE_KEY = process.env.V3_ROUTER_DEPLOYER_PRIVKEY || null;
+const RAW_PRIVATE_KEY = process.env.PRIVATE_KEY || null;
 
 let useEncryptedWallet = false;
 let usePrivateKey = false;
@@ -205,24 +207,46 @@ async function fetchCalldata(depositChainId, depositWei, outboundChainIds, to, f
 
 function formatEth(bn) { return utils.formatEther(bn); }
 
-async function cmdDistribute() {
+async function cmdDistribute(argv = {}) {
     const chains = buildPerChainConfig();
-    const src = pickSourceChain(chains);
+    
+    // Determine source chain
+    let src;
+    if (argv.source) {
+        src = chains.find(c => c.key === argv.source);
+        if (!src) throw new Error(`Source chain '${argv.source}' not found`);
+    } else {
+        src = pickSourceChain(chains);
+    }
+    
     const provider = new ethers.providers.JsonRpcProvider({ url: src.rpc, timeout: 600000 });
     const wallet = await getWalletForProvider(provider);
     console.log(`\nSource: ${src.display} (id=${src.chainId})\nSender: ${wallet.address}`);
 
     const defaultRecipient = wallet.address;
-    const recipient = promptAddress('Recipient (wallet B)', defaultRecipient);
+    const recipient = argv.recipient || (argv.source ? defaultRecipient : promptAddress('Recipient (wallet B)', defaultRecipient));
 
-    // Destination chains list defined in-script: default all configured chains except source
-    const destCandidates = chains.filter(c => c.chainId !== src.chainId);
-    console.log('Destination chains (comma-separated indices). Press ENTER for all:');
-    destCandidates.forEach((c, i) => console.log(`  [${i}] ${c.display} (id=${c.chainId})`));
-    const sel = prompt('Select: ');
-    const dests = (sel && sel.trim().length)
-        ? sel.split(',').map(s => destCandidates[Number(s.trim())]).filter(Boolean)
-        : destCandidates;
+    // Determine destination chains
+    let dests;
+    if (argv.destinations) {
+        // Parse comma-separated list of destination chain keys
+        const destKeys = argv.destinations.split(',').map(s => s.trim()).filter(Boolean);
+        dests = destKeys.map(key => {
+            const chain = chains.find(c => c.key === key);
+            if (!chain) throw new Error(`Destination chain '${key}' not found`);
+            return chain;
+        });
+        if (!dests.length) throw new Error('No valid destination chains specified');
+    } else {
+        // Interactive mode: prompt for destination selection
+        const destCandidates = chains.filter(c => c.chainId !== src.chainId);
+        console.log('Destination chains (comma-separated indices). Press ENTER for all:');
+        destCandidates.forEach((c, i) => console.log(`  [${i}] ${c.display} (id=${c.chainId})`));
+        const sel = prompt('Select: ');
+        dests = (sel && sel.trim().length)
+            ? sel.split(',').map(s => destCandidates[Number(s.trim())]).filter(Boolean)
+            : destCandidates;
+    }
     if (!dests.length) throw new Error('No destination chains selected');
     const outboundIds = dests.map(d => d.chainId);
 
@@ -231,12 +255,13 @@ async function cmdDistribute() {
     const nonce = await provider.getTransactionCount(wallet.address, 'pending');
 
     // Choose distribution mode
-    const overridePerChain = confirmAction('Override equal split and enter per-destination amounts? (Y/N): ');
-    const overrideRecipientPerChain = confirmAction('Override recipient per destination? (Y/N): ');
+    const hasAmountFlag = !!argv.amount;
+    const overridePerChain = hasAmountFlag ? false : confirmAction('Override equal split and enter per-destination amounts? (Y/N): ');
+    const overrideRecipientPerChain = hasAmountFlag ? false : confirmAction('Override recipient per destination? (Y/N): ');
 
     if (!overridePerChain && !overrideRecipientPerChain) {
         // Single deposit, equal split handled by Gas.zip
-        const amtEthStr = prompt(`Amount to deposit on ${src.display} in ETH (e.g., 0.05): `);
+        const amtEthStr = argv.amount || prompt(`Amount to deposit on ${src.display} in ETH (e.g., 0.05): `);
         if (!amtEthStr || !amtEthStr.trim()) throw new Error('Amount is required');
         const amountWei = utils.parseEther(amtEthStr.trim());
         if (amountWei.lte(0)) throw new Error('Amount must be > 0');
@@ -347,25 +372,48 @@ async function cmdDistribute() {
     }
 }
 
-async function cmdConcentrate() {
+async function cmdConcentrate(argv = {}) {
     const chains = buildPerChainConfig();
-    console.log('Available target chains:');
-    chains.forEach((c, i) => console.log(`  [${i}] ${c.display} (id=${c.chainId})`));
-    const idxStr = prompt('Select TARGET chain index (receive consolidated gas): ');
-    const idx = Number(idxStr);
-    if (!Number.isInteger(idx) || idx < 0 || idx >= chains.length) throw new Error('Invalid selection');
-    const target = chains[idx];
+    
+    // Determine target chain
+    let target;
+    if (argv.target) {
+        target = chains.find(c => c.key === argv.target);
+        if (!target) throw new Error(`Target chain '${argv.target}' not found`);
+    } else {
+        console.log('Available target chains:');
+        chains.forEach((c, i) => console.log(`  [${i}] ${c.display} (id=${c.chainId})`));
+        const idxStr = prompt('Select TARGET chain index (receive consolidated gas): ');
+        const idx = Number(idxStr);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= chains.length) throw new Error('Invalid selection');
+        target = chains[idx];
+    }
 
     // Allow overriding the recipient (wallet B) who will receive on the TARGET chain; default to Wallet A
     const targetProvider = new ethers.providers.JsonRpcProvider({ url: target.rpc, timeout: 600000 });
     const targetWallet = await getWalletForProvider(targetProvider);
-    const recipient = promptAddress('Recipient (wallet B on target)', targetWallet.address);
+    const recipient = argv.recipient || (argv.target ? targetWallet.address : promptAddress('Recipient (wallet B on target)', targetWallet.address));
 
     const results = [];
 
-    // We will send from every chain (including potentially the target chain; user may wish to exclude, so prompt):
-    const excludeTarget = confirmAction('Exclude target chain from senders? (Y/N): ');
-    const senders = chains.filter(c => !excludeTarget || c.chainId !== target.chainId);
+    // Determine source chains
+    let senders;
+    if (argv.sources) {
+        // Parse comma-separated list of source chain keys
+        const sourceKeys = argv.sources.split(',').map(s => s.trim()).filter(Boolean);
+        senders = sourceKeys.map(key => {
+            const chain = chains.find(c => c.key === key);
+            if (!chain) throw new Error(`Source chain '${key}' not found`);
+            return chain;
+        });
+        if (!senders.length) throw new Error('No valid source chains specified');
+    } else {
+        // Interactive mode: exclude target chain based on flag or prompt
+        const excludeTarget = argv.target 
+            ? (argv.excludeTarget !== false) // Default true if target specified
+            : confirmAction('Exclude target chain from senders? (Y/N): ');
+        senders = chains.filter(c => !excludeTarget || c.chainId !== target.chainId);
+    }
 
     // Build plans
     for (const c of senders) {
@@ -469,22 +517,155 @@ async function cmdConcentrate() {
     }
 }
 
-async function main() {
-    const chains = buildPerChainConfig(); // validate env early
-    // Build a default provider to derive the base wallet A address to show early
-    const firstProvider = new ethers.providers.JsonRpcProvider({ url: chains[0].rpc, timeout: 600000 });
-    const w0 = await getWalletForProvider(firstProvider);
-    console.log(`*******\nWallet A address (from env): ${w0.address}\n*******`);
-
-    const argv = process.argv.slice(2);
-    const cmd = (argv[0] || '').toLowerCase();
-    if (cmd !== 'distribute' && cmd !== 'concentrate') {
-        console.error('Usage: node scripts/gas_zip_helper.mjs <distribute|concentrate>');
-        process.exit(1);
+async function cmdList() {
+    const allChains = Object.values(chainConfig);
+    const keys = allChains.map(c => c.key).sort();
+    console.log('Available chain keys:');
+    console.log(keys.join(', '));
+    console.log('');
+    
+    const chains = buildPerChainConfig();
+    if (chains.length > 0) {
+        const firstProvider = new ethers.providers.JsonRpcProvider({ url: chains[0].rpc, timeout: 600000 });
+        const wallet = await getWalletForProvider(firstProvider);
+        const balance = await firstProvider.getBalance(wallet.address);
+        console.log(`Wallet address: ${wallet.address}`);
+        console.log(`Balance on ${chains[0].display}: ${utils.formatEther(balance)} ${chains[0].currency}`);
     }
+}
 
-    if (cmd === 'distribute') await cmdDistribute();
-    if (cmd === 'concentrate') await cmdConcentrate();
+async function cmdInfo() {
+    const chains = buildPerChainConfig();
+    
+    // Get wallet address from first chain
+    const firstProvider = new ethers.providers.JsonRpcProvider({ url: chains[0].rpc, timeout: 600000 });
+    const wallet = await getWalletForProvider(firstProvider);
+    
+    console.log(`*******\nWallet address: ${wallet.address}\n*******\n`);
+    
+    // Collect chain info
+    const tableData = [];
+    
+    for (const chain of chains) {
+        try {
+            const provider = new ethers.providers.JsonRpcProvider({ url: chain.rpc, timeout: 600000 });
+            const chainWallet = await getWalletForProvider(provider);
+            
+            // Fetch balance and nonce in parallel
+            const [balance, nonce] = await Promise.all([
+                provider.getBalance(chainWallet.address),
+                provider.getTransactionCount(chainWallet.address, 'latest')
+            ]);
+            
+            const balanceFormatted = utils.formatEther(balance);
+            const balanceRounded = parseFloat(balanceFormatted).toFixed(6);
+            
+            tableData.push({
+                'Chain': chain.display,
+                'Key': chain.key,
+                'Balance': `${balanceRounded} ${chain.currency}`,
+                'Nonce': nonce
+            });
+        } catch (error) {
+            tableData.push({
+                'Chain': chain.display,
+                'Key': chain.key,
+                'Balance': 'ERROR',
+                'Nonce': 'ERROR'
+            });
+        }
+    }
+    
+    // Print table
+    console.table(tableData);
+    
+    // Summary
+    const totalChains = tableData.length;
+    const errorChains = tableData.filter(row => row.Balance === 'ERROR').length;
+    console.log(`\nTotal chains: ${totalChains}`);
+    if (errorChains > 0) {
+        console.log(`Errors: ${errorChains}`);
+    }
+}
+
+async function main() {
+    // CLI argument parsing
+    const argv = yargs(hideBin(process.argv))
+        .scriptName('gas_zip_helper')
+        .usage('Usage: $0 <command> [options]')
+        .command('list', 'List available chain keys and wallet balance', {}, async () => {
+            await cmdList();
+            process.exit(0);
+        })
+        .command('info', 'Display wallet address and balance/nonce table for all chains', {}, async () => {
+            await cmdInfo();
+            process.exit(0);
+        })
+        .command(
+            'distribute',
+            'Distribute funds from one chain to multiple destination chains via Gas.zip',
+            (yargs) => {
+                return yargs
+                    .option('source', {
+                        type: 'string',
+                        describe: 'Source chain key (e.g., arbitrum_one)'
+                    })
+                    .option('destinations', {
+                        type: 'string',
+                        describe: 'Comma-separated destination chain keys'
+                    })
+                    .option('recipient', {
+                        type: 'string',
+                        describe: 'Recipient address on destination chains'
+                    })
+                    .option('amount', {
+                        type: 'string',
+                        describe: 'Amount in ETH to distribute (e.g., 0.05)'
+                    })
+                    .example('$0 distribute', 'Interactive mode')
+                    .example('$0 distribute --source arbitrum_one --destinations base,optimism', 'Specify source and destinations')
+                    .example('$0 distribute --source arbitrum_one --destinations base,optimism --amount 0.05', 'Distribute 0.05 ETH from Arbitrum to Base and Optimism')
+                    .example('$0 distribute --source arbitrum_one --destinations base,optimism --amount 0.05 --recipient 0x123...', 'Specify all parameters');
+            },
+            async (argv) => {
+                await cmdDistribute(argv);
+            }
+        )
+        .command(
+            'concentrate',
+            'Concentrate funds from multiple chains to one target chain via Gas.zip',
+            (yargs) => {
+                return yargs
+                    .option('target', {
+                        type: 'string',
+                        describe: 'Target chain key to receive consolidated funds'
+                    })
+                    .option('sources', {
+                        type: 'string',
+                        describe: 'Comma-separated list of source chain keys (e.g., arbitrum_one,optimism,base)'
+                    })
+                    .option('recipient', {
+                        type: 'string',
+                        describe: 'Recipient address on target chain'
+                    })
+                    .option('exclude-target', {
+                        type: 'boolean',
+                        default: true,
+                        describe: 'Exclude target chain from sender list (when --sources not specified)'
+                    })
+                    .example('$0 concentrate', 'Interactive mode')
+                    .example('$0 concentrate --target arbitrum_one --recipient 0x123...', 'Concentrate from all chains to Arbitrum')
+                    .example('$0 concentrate --target base --sources arbitrum_one,optimism', 'Concentrate from specific chains to Base');
+            },
+            async (argv) => {
+                await cmdConcentrate(argv);
+            }
+        )
+        .demandCommand(1, 'You must specify a command: list, info, distribute, or concentrate')
+        .alias('h', 'help')
+        .help()
+        .wrap(Math.min(120, process.stdout.columns || 100))
+        .argv;
 }
 
 main().catch((err) => {

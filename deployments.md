@@ -1,6 +1,8 @@
 Chain | Chain ID | Address
  --- | --- | ---
 Abstract Mainnet | 2741 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://abscan.org/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
+Ancient8 | 888888888 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://scan.ancient8.gg/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
+ApeChain | 33139 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://apescan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Arbitrum Nova | 42170 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://nova.arbiscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Arbitrum One | 42161 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://arbiscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Aurora | 1313161554 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.aurora.dev/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
@@ -16,6 +18,7 @@ Cyber | 7560 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://cyber-explor
 Ethereum | 1 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://etherscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Flare | 14 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://flare-explorer.flare.network/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Flow EVM | 747 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://flowscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
+Fraxtal Mainnet | 252 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://fraxscan.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 HyperEVM | 999 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://hyperevmscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Injective EVM | 2525 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://inevm.calderaexplorer.xyz/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Injective Mainnet | 1776 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://blockscout.injective.network/address/0x7000000db505d50f077492Efa36a8968ff7493dD)

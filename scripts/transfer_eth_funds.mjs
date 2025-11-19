@@ -1,8 +1,11 @@
+#!/usr/bin/env node
 import 'dotenv/config';
 import PromptSync from "prompt-sync";
 import { Wallet, ethers, utils } from "ethers";
 import { decrypt_mnemonic } from "./wallet_manager.mjs";
-import { configuredChains, getChainsByKeys, getRpcUrl } from './chains.mjs';
+import { configuredChains, getChainsByKeys, getRpcUrl, chainConfig } from '../chainconfig/chains.mjs';
+import yargs from 'yargs/yargs';
+import { hideBin } from 'yargs/helpers';
 
 const prompt = PromptSync();
 
@@ -49,11 +52,78 @@ if (availableSources.length > 1) {
     useMetamaskPrivateKey = !!METAMASK_PRIVATE_KEY;
 }
 
-// Optional: specify exact chain keys here; leave empty array to use all configured chains
-const SELECTED_CHAIN_KEYS = ['arbitrum_one', 'hyperevm'];
-const SOURCE_CHAINS = SELECTED_CHAIN_KEYS.length
-  ? getChainsByKeys(SELECTED_CHAIN_KEYS, { requireRpc: true })
-  : configuredChains();
+// CLI argument parsing
+const argv = yargs(hideBin(process.argv))
+    .scriptName('transfer_eth_funds')
+    .usage('Usage: $0 [options]')
+    .command('list', 'List available chain keys and wallet balance on first chain')
+    .option('only', { 
+        type: 'string', 
+        describe: 'Comma-separated chain keys to transfer from (e.g., arbitrum_one,base)' 
+    })
+    .option('recipient', { 
+        type: 'string', 
+        describe: 'Recipient address (overrides FUNDS_RECIPIENT env var)' 
+    })
+    .option('dry-run', { 
+        type: 'boolean', 
+        default: false, 
+        describe: 'Simulate transfers without sending transactions' 
+    })
+    .option('no-prompt', {
+        type: 'boolean',
+        default: false,
+        describe: 'Skip confirmation prompts (use with caution)'
+    })
+    .example('$0 list', 'Show available chains')
+    .example('$0 --only arbitrum_one,base --recipient 0x123...', 'Transfer from specific chains')
+    .example('$0 --dry-run', 'Simulate transfers without sending')
+    .alias('h', 'help')
+    .help()
+    .argv;
+
+// Handle list command
+if (argv._[0] === 'list') {
+    const allChains = Object.values(chainConfig);
+    const keys = allChains.map(c => c.key).sort();
+    console.log('Available chain keys:');
+    console.log(keys.join(', '));
+    console.log('');
+    const firstConfigured = configuredChains()[0];
+    if (firstConfigured) {
+        const rpc = getRpcUrl(firstConfigured);
+        const provider = new ethers.providers.JsonRpcProvider({ url: rpc, timeout: 600000 });
+        // Determine wallet to show balance
+        let wallet;
+        if (ENCRYPTED_WALLET) {
+            const seedPhrase = await decrypt_mnemonic(ENCRYPTED_WALLET);
+            wallet = Wallet.fromMnemonic(seedPhrase).connect(provider);
+        } else if (RAW_PRIVATE_KEY) {
+            wallet = new Wallet(RAW_PRIVATE_KEY, provider);
+        } else if (METAMASK_PRIVATE_KEY) {
+            wallet = new Wallet(METAMASK_PRIVATE_KEY, provider);
+        }
+        if (wallet) {
+            const balance = await provider.getBalance(wallet.address);
+            console.log(`Wallet address: ${wallet.address}`);
+            console.log(`Balance on ${firstConfigured.display}: ${utils.formatEther(balance)} ${firstConfigured.currency}`);
+        }
+    }
+    process.exit(0);
+}
+
+// Determine chains based on --only flag
+let SOURCE_CHAINS;
+if (argv.only) {
+    const selectedKeys = argv.only.split(',').map(k => k.trim()).filter(Boolean);
+    SOURCE_CHAINS = getChainsByKeys(selectedKeys, { requireRpc: true });
+    if (SOURCE_CHAINS.length === 0) {
+        console.error(`No valid chains found for keys: ${selectedKeys.join(', ')}`);
+        process.exit(1);
+    }
+} else {
+    SOURCE_CHAINS = configuredChains();
+}
 
 const OVERRIDES = new Map([
   ['polygon', {
@@ -155,15 +225,21 @@ const estimateTxFee = async (provider, from, to, valueWei, overrides = {}) => {
 };
 
 const main = async () => {
-    console.log("Preparing multi-chain ETH transfer (99% of wallet balance)\n");
+    const isDryRun = argv['dry-run'];
+    const noPrompt = argv['no-prompt'];
+    
+    console.log(`${isDryRun ? '[DRY RUN] ' : ''}Preparing multi-chain ETH transfer (99% of wallet balance)\n`);
     const chains = buildPerChainConfig();
 
     const firstProvider = new ethers.providers.JsonRpcProvider({ url: chains[0].rpc, timeout: 600000 });
     const wallet0 = await getWalletForProvider(firstProvider);
     console.log(`*******\nSender address: ${wallet0.address}\n*******`);
 
-    const defaultRecipient = process.env.FUNDS_RECIPIENT || "";
-    const recipient = askAddress("Recipient address", defaultRecipient);
+    // Determine recipient from CLI arg or env var
+    const defaultRecipient = argv.recipient || process.env.FUNDS_RECIPIENT || "";
+    const recipient = noPrompt && defaultRecipient 
+        ? ethers.utils.getAddress(defaultRecipient)
+        : askAddress("Recipient address", defaultRecipient);
 
     // Gather per-chain info and compute planned send amounts
     const plans = [];
@@ -205,7 +281,12 @@ const main = async () => {
         }
     }
 
-    if (!confirmAction("Proceed to send on ALL chains? (Y/N): ")) {
+    if (isDryRun) {
+        console.log("\n[DRY RUN] Simulation complete. No transactions sent.");
+        return;
+    }
+
+    if (!noPrompt && !confirmAction("Proceed to send on ALL chains? (Y/N): ")) {
         console.log("Transfer aborted by the user.");
         return;
     }
