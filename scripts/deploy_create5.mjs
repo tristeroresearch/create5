@@ -5,7 +5,7 @@ import https from 'https';
 import hardhat from 'hardhat';
 import { Wallet, ethers, utils } from 'ethers';
 import { decrypt_mnemonic } from './wallet_manager.mjs';
-import { configuredChains, getRpcUrl, getChainsByKeys, chainConfig } from './chains.mjs';
+import { configuredChains, getRpcUrl, getChainsByKeys, chainConfig } from '../chainconfig/chains.mjs';
 import yargs from 'yargs/yargs';
 import { hideBin } from 'yargs/helpers';
 // HyperEVM L1 action signing deps
@@ -87,7 +87,27 @@ function ensureFiles() {
 function appendDeploymentRow(display, chainId, explorerUrl, address) {
     const link = `${explorerUrl.replace(/\/$/, '')}/address/${address}`;
     const mdLink = `[${address}](${link})`;
-    fs.appendFileSync(DEPLOYMENTS_MD, `${display} | ${chainId} | ${mdLink}\n`);
+    const newRow = `${display} | ${chainId} | ${mdLink}`;
+    
+    // Read existing file
+    const content = fs.readFileSync(DEPLOYMENTS_MD, 'utf8');
+    const lines = content.split('\n');
+    
+    // Separate header and data rows
+    const header = lines.slice(0, 2); // "Chain | Chain ID | Address" and separator line
+    const dataRows = lines.slice(2).filter(line => line.trim().length > 0);
+    
+    // Add new row and sort alphabetically by chain name (case-insensitive)
+    dataRows.push(newRow);
+    dataRows.sort((a, b) => {
+        const nameA = a.split('|')[0].trim().toLowerCase();
+        const nameB = b.split('|')[0].trim().toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+    
+    // Write back the file with header, separator, and sorted rows
+    const newContent = [...header, ...dataRows, ''].join('\n');
+    fs.writeFileSync(DEPLOYMENTS_MD, newContent, 'utf8');
 }
 
 function logLine(obj) {
@@ -433,11 +453,22 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
         const requiredEth = utils.formatEther(requiredDestWei);
         const currentEth = utils.formatEther(destBal);
         const shortfallEth = utils.formatEther(shortfall);
+        
+        // Calculate expected deployment addresses
+        const testContractAddress = (nonce === 0 || !allowSkipTest) 
+            ? ethers.utils.getContractAddress({ from: wallet.address, nonce: nonce })
+            : 'N/A (test contract skipped)';
+        const create5Nonce = (nonce === 0 || !allowSkipTest) ? nonce + 1 : nonce;
+        const create5ContractAddress = ethers.utils.getContractAddress({ from: wallet.address, nonce: create5Nonce });
+        
         const summary = {
             level: 'info',
             step: 'dry_run',
             chain: chain.key,
             chainId: chain.chainId,
+            currentNonce: nonce,
+            expectedTestContractAddress: testContractAddress,
+            expectedCreate5ContractAddress: create5ContractAddress,
             deployMult,
             testMult,
             estDeployGas: est.gasLimit.toString(),

@@ -18,40 +18,40 @@ const DIRECT_FORWARDER = '0x391E7C679d29bD940d63be94AD22A25d25b5A604';
 
 // Build chains list from centralized config (only chains with RPC configured)
 const OVERRIDES = new Map([
-  ['polygon_mainnet', {
-    maxFeePerGas: ethers.utils.parseUnits('50', 'gwei'),
-    maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
-  }],
+    ['polygon_mainnet', {
+        maxFeePerGas: ethers.utils.parseUnits('50', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
+    }],
 ]);
 
 // Optional: specify exact chain keys here; leave empty array to use all configured chains
 const SELECTED_CHAIN_KEYS = [];
 const SOURCE_CHAINS = SELECTED_CHAIN_KEYS.length
-  ? getChainsByKeys(SELECTED_CHAIN_KEYS, { requireRpc: true })
-  : configuredChains();
+    ? getChainsByKeys(SELECTED_CHAIN_KEYS, { requireRpc: true })
+    : configuredChains();
 const CHAINS = SOURCE_CHAINS.map(c => ({
-  key: c.key,
-  display: c.display,
-  currency: c.currency,
-  chainId: c.chainId,
-  rpc: getRpcUrl(c),
-  explorer: c.explorerUrl,
-  gasOverrides: OVERRIDES.get(c.key) || {},
+    key: c.key,
+    display: c.display,
+    currency: c.currency,
+    chainId: c.chainId,
+    rpc: getRpcUrl(c),
+    explorer: c.explorerUrl,
+    gasOverrides: OVERRIDES.get(c.key) || {},
 }));
 
 function buildPerChainConfig() {
-  const missing = [];
-  const chains = CHAINS.map(c => {
-    const required = { rpc: c.rpc, explorer: c.explorer, chainId: c.chainId };
-    const missingKeys = Object.entries(required).filter(([, v]) => !v && v !== 0).map(([k]) => `${c.key}.${k}`);
-    if (missingKeys.length) missing.push(...missingKeys);
-    return c;
-  });
-  if (missing.length) {
-    throw new Error(`Missing configuration for chains:\n  - ${missing.join('\n  - ')}`);
-  }
-  if (chains.length === 0) throw new Error('No chains configured (RPC missing).');
-  return chains;
+    const missing = [];
+    const chains = CHAINS.map(c => {
+        const required = { rpc: c.rpc, explorer: c.explorer, chainId: c.chainId };
+        const missingKeys = Object.entries(required).filter(([, v]) => !v && v !== 0).map(([k]) => `${c.key}.${k}`);
+        if (missingKeys.length) missing.push(...missingKeys);
+        return c;
+    });
+    if (missing.length) {
+        throw new Error(`Missing configuration for chains:\n  - ${missing.join('\n  - ')}`);
+    }
+    if (chains.length === 0) throw new Error('No chains configured (RPC missing).');
+    return chains;
 }
 
 // Wallet sources: prioritize private key per user requirement; also support encrypted wallet like other scripts
@@ -81,55 +81,55 @@ function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
 function jitter(ms) { return Math.floor(ms * (0.8 + Math.random() * 0.4)); }
 
 function isRateLimitStatus(statusCode, bodyStr = '') {
-  if (statusCode === 429) return true;
-  const msg = (bodyStr || '').toLowerCase();
-  return (
-    msg.includes('429') ||
-    msg.includes('rate limit') ||
-    msg.includes('too many requests') ||
-    msg.includes('request rate')
-  );
+    if (statusCode === 429) return true;
+    const msg = (bodyStr || '').toLowerCase();
+    return (
+        msg.includes('429') ||
+        msg.includes('rate limit') ||
+        msg.includes('too many requests') ||
+        msg.includes('request rate')
+    );
 }
 
 async function requestJsonWithRetry(url) {
-  let attempt = 0;
-  while (true) {
-    try {
-      const json = await new Promise((resolve, reject) => {
-        const req = https.get(url, (res) => {
-          let body = '';
-          res.setEncoding('utf8');
-          res.on('data', (chunk) => { body += chunk; });
-          res.on('end', () => {
-            if (res.statusCode < 200 || res.statusCode >= 300) {
-              const preview = body && body.length > 800 ? body.slice(0, 800) + '...<truncated>' : (body || res.statusMessage);
-              return reject(Object.assign(new Error(`HTTP ${res.statusCode}: ${preview}`), { statusCode: res.statusCode, body }));
-            }
-            try {
-              resolve(JSON.parse(body));
-            } catch (e) {
-              reject(e);
-            }
-          });
-        });
-        req.on('error', reject);
-        req.setTimeout(15000, () => {
-          req.destroy(new Error('Request timeout'));
-        });
-      });
-      return json;
-    } catch (err) {
-      attempt++;
-      const status = err && err.statusCode;
-      const body = err && err.body;
-      // Only backoff/retry on explicit 429 rate limiting; otherwise, surface the error immediately
-      const shouldRetry = attempt <= MAX_RETRIES && isRateLimitStatus(status, body);
-      if (!shouldRetry) throw err;
-      const delay = Math.min(jitter(BASE_DELAY_MS * Math.pow(2, attempt)), 10_000);
-      console.warn(`[gas.zip] backoff attempt ${attempt}/${MAX_RETRIES} -> waiting ${delay}ms (${status || 'no-status'})`);
-      await sleep(delay);
+    let attempt = 0;
+    while (true) {
+        try {
+            const json = await new Promise((resolve, reject) => {
+                const req = https.get(url, (res) => {
+                    let body = '';
+                    res.setEncoding('utf8');
+                    res.on('data', (chunk) => { body += chunk; });
+                    res.on('end', () => {
+                        if (res.statusCode < 200 || res.statusCode >= 300) {
+                            const preview = body && body.length > 800 ? body.slice(0, 800) + '...<truncated>' : (body || res.statusMessage);
+                            return reject(Object.assign(new Error(`HTTP ${res.statusCode}: ${preview}`), { statusCode: res.statusCode, body }));
+                        }
+                        try {
+                            resolve(JSON.parse(body));
+                        } catch (e) {
+                            reject(e);
+                        }
+                    });
+                });
+                req.on('error', reject);
+                req.setTimeout(15000, () => {
+                    req.destroy(new Error('Request timeout'));
+                });
+            });
+            return json;
+        } catch (err) {
+            attempt++;
+            const status = err && err.statusCode;
+            const body = err && err.body;
+            // Only backoff/retry on explicit 429 rate limiting; otherwise, surface the error immediately
+            const shouldRetry = attempt <= MAX_RETRIES && isRateLimitStatus(status, body);
+            if (!shouldRetry) throw err;
+            const delay = Math.min(jitter(BASE_DELAY_MS * Math.pow(2, attempt)), 10_000);
+            console.warn(`[gas.zip] backoff attempt ${attempt}/${MAX_RETRIES} -> waiting ${delay}ms (${status || 'no-status'})`);
+            await sleep(delay);
+        }
     }
-  }
 }
 
 async function getWalletForProvider(provider) {

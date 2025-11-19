@@ -50,7 +50,7 @@ if (availableSources.length > 1) {
 }
 
 // Optional: specify exact chain keys here; leave empty array to use all configured chains
-const SELECTED_CHAIN_KEYS = ['injevm'];
+const SELECTED_CHAIN_KEYS = ['arbitrum_one', 'hyperevm'];
 const SOURCE_CHAINS = SELECTED_CHAIN_KEYS.length
   ? getChainsByKeys(SELECTED_CHAIN_KEYS, { requireRpc: true })
   : configuredChains();
