@@ -30,6 +30,10 @@ const OVERRIDES = new Map([
         maxFeePerGas: ethers.utils.parseUnits('50', 'gwei'),
         maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
     }],
+     ['ronin', {
+        maxFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
+    }]
 ]);
 
 // Optional: specify exact chain keys here; leave empty array to use all configured chains

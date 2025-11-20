@@ -26,7 +26,12 @@ const OVERRIDES = new Map([
     ['polygon', {
         maxFeePerGas: ethers.utils.parseUnits('70', 'gwei'),
         maxPriorityFeePerGas: ethers.utils.parseUnits('35', 'gwei'),
-    }],
+    }
+    ],
+    ['ronin', {
+        maxFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
+    }]
 ]);
 
 // Source chain for funding outbound gas and for receiving refunds
@@ -88,15 +93,15 @@ function appendDeploymentRow(display, chainId, explorer, address) {
     const link = `${explorer.replace(/\/$/, '')}/address/${address}`;
     const mdLink = `[${address}](${link})`;
     const newRow = `${display} | ${chainId} | ${mdLink}`;
-    
+
     // Read existing file
     const content = fs.readFileSync(DEPLOYMENTS_MD, 'utf8');
     const lines = content.split('\n');
-    
+
     // Separate header and data rows
     const header = lines.slice(0, 2); // "Chain | Chain ID | Address" and separator line
     const dataRows = lines.slice(2).filter(line => line.trim().length > 0);
-    
+
     // Add new row and sort alphabetically by chain name (case-insensitive)
     dataRows.push(newRow);
     dataRows.sort((a, b) => {
@@ -104,7 +109,7 @@ function appendDeploymentRow(display, chainId, explorer, address) {
         const nameB = b.split('|')[0].trim().toLowerCase();
         return nameA.localeCompare(nameB);
     });
-    
+
     // Write back the file with header, separator, and sorted rows
     const newContent = [...header, ...dataRows, ''].join('\n');
     fs.writeFileSync(DEPLOYMENTS_MD, newContent, 'utf8');
@@ -414,7 +419,7 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     // Get gas.zip prices (optional if both funding and refund are skipped)
     const priceInfo = gasZipPricesMap.get(chain.chainId);
     const srcPrice = gasZipPricesMap.get(sourceCtx.chain.chainId);
-    
+
     // Only require gas.zip prices if we're actually going to use them for funding/refund
     if (!shouldSkipFunding) {
         if (!priceInfo || typeof priceInfo.price !== 'number') {
@@ -424,7 +429,7 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
             throw new Error('Missing gas.zip price for source chain');
         }
     }
-    
+
     if (!skipRefund && (!priceInfo || typeof priceInfo.price !== 'number')) {
         throw new Error(`Missing gas.zip price for chainId ${chain.chainId}. Chain may not be supported by gas.zip. Use --skip-refund to skip refund.`);
     }
@@ -453,14 +458,14 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
         const requiredEth = utils.formatEther(requiredDestWei);
         const currentEth = utils.formatEther(destBal);
         const shortfallEth = utils.formatEther(shortfall);
-        
+
         // Calculate expected deployment addresses
-        const testContractAddress = (nonce === 0 || !allowSkipTest) 
+        const testContractAddress = (nonce === 0 || !allowSkipTest)
             ? ethers.utils.getContractAddress({ from: wallet.address, nonce: nonce })
             : 'N/A (test contract skipped)';
         const create5Nonce = (nonce === 0 || !allowSkipTest) ? nonce + 1 : nonce;
         const create5ContractAddress = ethers.utils.getContractAddress({ from: wallet.address, nonce: create5Nonce });
-        
+
         const summary = {
             level: 'info',
             step: 'dry_run',
