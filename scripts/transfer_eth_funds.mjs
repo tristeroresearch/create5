@@ -3,7 +3,7 @@ import 'dotenv/config';
 import PromptSync from "prompt-sync";
 import { Wallet, ethers, utils } from "ethers";
 import { decrypt_mnemonic } from "./wallet_manager.mjs";
-import { configuredChains, getChainsByKeys, getRpcUrl, chainConfig } from '../chainconfig/chains.mjs';
+import { configuredChains, getChainsByKeys, getRpcUrl, getExplorerUrl, chainConfig } from '../chainconfig/chains.mjs';
 import yargs from 'yargs/yargs';
 import { hideBin } from 'yargs/helpers';
 
@@ -137,7 +137,7 @@ const CHAINS = SOURCE_CHAINS.map(c => ({
   display: c.display,
   currency: c.currency,
   rpc: getRpcUrl(c),
-  explorer: c.explorerUrl,
+  explorer: getExplorerUrl(c),
   gasOverrides: OVERRIDES.get(c.key) || {},
 }));
 

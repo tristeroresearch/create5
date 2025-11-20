@@ -5,7 +5,7 @@ import https from 'https';
 import hardhat from 'hardhat';
 import { Wallet, ethers, utils } from 'ethers';
 import { decrypt_mnemonic } from './wallet_manager.mjs';
-import { configuredChains, getRpcUrl, getChainsByKeys, chainConfig } from '../chainconfig/chains.mjs';
+import { configuredChains, getRpcUrl, getExplorerUrl, getChainsByKeys, chainConfig } from '../chainconfig/chains.mjs';
 import yargs from 'yargs/yargs';
 import { hideBin } from 'yargs/helpers';
 // HyperEVM L1 action signing deps
@@ -84,8 +84,8 @@ function ensureFiles() {
     }
 }
 
-function appendDeploymentRow(display, chainId, explorerUrl, address) {
-    const link = `${explorerUrl.replace(/\/$/, '')}/address/${address}`;
+function appendDeploymentRow(display, chainId, explorer, address) {
+    const link = `${explorer.replace(/\/$/, '')}/address/${address}`;
     const mdLink = `[${address}](${link})`;
     const newRow = `${display} | ${chainId} | ${mdLink}`;
     
@@ -185,7 +185,7 @@ function configuredChainsStrict() {
         currency: c.currency,
         chainId: c.chainId,
         rpc: getRpcUrl(c),
-        explorer: c.explorerUrl,
+        explorer: getExplorerUrl(c),
         gasOverrides: OVERRIDES.get(c.key) || {},
     })).filter(c => !!c.rpc);
 }
@@ -201,7 +201,7 @@ function getChainByKeyStrict(key) {
         currency: c.currency,
         chainId: c.chainId,
         rpc,
-        explorer: c.explorerUrl,
+        explorer: getExplorerUrl(c),
         gasOverrides: OVERRIDES.get(c.key) || {},
     };
 }

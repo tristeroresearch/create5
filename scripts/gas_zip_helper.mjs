@@ -3,10 +3,16 @@ import 'dotenv/config';
 import PromptSync from 'prompt-sync';
 import { Wallet, ethers, utils } from 'ethers';
 import { decrypt_mnemonic } from './wallet_manager.mjs';
-import { configuredChains, getRpcUrl, getChainsByKeys, chainConfig } from '../chainconfig/chains.mjs';
+import { configuredChains, getRpcUrl, getExplorerUrl, getChainsByKeys, chainConfig } from '../chainconfig/chains.mjs';
 import yargs from 'yargs/yargs';
 import { hideBin } from 'yargs/helpers';
 import https from 'https';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const prompt = PromptSync();
 
@@ -37,7 +43,7 @@ const CHAINS = SOURCE_CHAINS.map(c => ({
     currency: c.currency,
     chainId: c.chainId,
     rpc: getRpcUrl(c),
-    explorer: c.explorerUrl,
+    explorer: getExplorerUrl(c),
     gasOverrides: OVERRIDES.get(c.key) || {},
 }));
 
@@ -534,8 +540,39 @@ async function cmdList() {
     }
 }
 
+// Parse deployments.md to get deployed chain IDs
+function parseDeployments() {
+    const deploymentsPath = path.join(__dirname, '..', 'deployments.md');
+    try {
+        const content = fs.readFileSync(deploymentsPath, 'utf8');
+        const deployedChainIds = new Set();
+        
+        // Parse markdown table: skip header rows, extract chain ID from each line
+        const lines = content.split('\n');
+        for (let i = 2; i < lines.length; i++) { // Skip header and separator
+            const line = lines[i].trim();
+            if (!line || line.startsWith('#')) continue;
+            
+            const parts = line.split('|').map(p => p.trim());
+            if (parts.length >= 2) {
+                const chainIdStr = parts[1];
+                const chainId = parseInt(chainIdStr, 10);
+                if (!isNaN(chainId)) {
+                    deployedChainIds.add(chainId);
+                }
+            }
+        }
+        
+        return deployedChainIds;
+    } catch (error) {
+        console.error('Warning: Could not parse deployments.md:', error.message);
+        return new Set();
+    }
+}
+
 async function cmdInfo() {
     const chains = buildPerChainConfig();
+    const deployedChainIds = parseDeployments();
     
     // Get wallet address from first chain
     const firstProvider = new ethers.providers.JsonRpcProvider({ url: chains[0].rpc, timeout: 600000 });
@@ -543,10 +580,17 @@ async function cmdInfo() {
     
     console.log(`*******\nWallet address: ${wallet.address}\n*******\n`);
     
-    // Collect chain info
-    const tableData = [];
+    // Print table header
+    const headers = ['Index', 'Key', 'Create5 deployed', 'Balance', 'Nonce'];
+    const colWidths = [8, 25, 18, 25, 10];
+    const headerRow = headers.map((h, i) => h.padEnd(colWidths[i])).join(' | ');
+    console.log(headerRow);
+    console.log('-'.repeat(headerRow.length));
     
-    for (const chain of chains) {
+    let errorCount = 0;
+    
+    for (let i = 0; i < chains.length; i++) {
+        const chain = chains[i];
         try {
             const provider = new ethers.providers.JsonRpcProvider({ url: chain.rpc, timeout: 600000 });
             const chainWallet = await getWalletForProvider(provider);
@@ -559,32 +603,40 @@ async function cmdInfo() {
             
             const balanceFormatted = utils.formatEther(balance);
             const balanceRounded = parseFloat(balanceFormatted).toFixed(6);
+            const balanceStr = `${balanceRounded} ${chain.currency}`;
+            const create5Deployed = deployedChainIds.has(chain.chainId) ? 'Yes' : 'No';
             
-            tableData.push({
-                'Chain': chain.display,
-                'Key': chain.key,
-                'Balance': `${balanceRounded} ${chain.currency}`,
-                'Nonce': nonce
-            });
+            // Print row immediately
+            const row = [
+                i.toString().padEnd(colWidths[0]),
+                chain.key.substring(0, colWidths[1] - 1).padEnd(colWidths[1]),
+                create5Deployed.padEnd(colWidths[2]),
+                balanceStr.substring(0, colWidths[3] - 1).padEnd(colWidths[3]),
+                nonce.toString().padEnd(colWidths[4])
+            ].join(' | ');
+            console.log(row);
+            console.log('-'.repeat(headerRow.length));
         } catch (error) {
-            tableData.push({
-                'Chain': chain.display,
-                'Key': chain.key,
-                'Balance': 'ERROR',
-                'Nonce': 'ERROR'
-            });
+            const create5Deployed = deployedChainIds.has(chain.chainId) ? 'Yes' : 'No';
+            
+            // Print error row immediately
+            const row = [
+                i.toString().padEnd(colWidths[0]),
+                chain.key.substring(0, colWidths[1] - 1).padEnd(colWidths[1]),
+                create5Deployed.padEnd(colWidths[2]),
+                'ERROR'.padEnd(colWidths[3]),
+                'ERROR'.padEnd(colWidths[4])
+            ].join(' | ');
+            console.log(row);
+            console.log('-'.repeat(headerRow.length));
+            errorCount++;
         }
     }
     
-    // Print table
-    console.table(tableData);
-    
     // Summary
-    const totalChains = tableData.length;
-    const errorChains = tableData.filter(row => row.Balance === 'ERROR').length;
-    console.log(`\nTotal chains: ${totalChains}`);
-    if (errorChains > 0) {
-        console.log(`Errors: ${errorChains}`);
+    console.log(`\nTotal chains: ${chains.length}`);
+    if (errorCount > 0) {
+        console.log(`Errors: ${errorCount}`);
     }
 }
 
