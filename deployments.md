@@ -41,6 +41,7 @@ Mantle | 5000 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://mantlescan.
 Metis | 1088 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.metis.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Mint | 185 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.mintchain.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Mode | 34443 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.mode.network/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
+Monad | 143 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://monadvision.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Moonriver | 1285 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://moonriver.moonscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Morph | 2818 | [0x7000000db505d50f077492Efa36a8968ff7493dD](/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 opBNB Mainnet | 204 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://opbnb.bscscan.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
