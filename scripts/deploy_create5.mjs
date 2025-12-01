@@ -31,6 +31,10 @@ const OVERRIDES = new Map([
     ['ronin', {
         maxFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
         maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
+    }],
+    ['gravity', {
+        maxFeePerGas: ethers.utils.parseUnits('1800', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('2000', 'gwei'),
     }]
 ]);
 
@@ -183,7 +187,7 @@ async function fetchGasZipChains() {
 
 // ---------- Chains config helpers ----------
 function configuredChainsStrict() {
-    const arr = configuredChains();
+    const arr = configuredChains;
     return arr.map(c => ({
         key: c.key,
         display: c.display,

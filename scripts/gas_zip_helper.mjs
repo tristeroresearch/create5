@@ -39,8 +39,8 @@ const OVERRIDES = new Map([
 // Optional: specify exact chain keys here; leave empty array to use all configured chains
 const SELECTED_CHAIN_KEYS = [];
 const SOURCE_CHAINS = SELECTED_CHAIN_KEYS.length
-    ? getChainsByKeys(SELECTED_CHAIN_KEYS, { requireRpc: true })
-    : configuredChains();
+    ? getChainsByKeys(SELECTED_CHAIN_KEYS).filter(c => getRpcUrl(c))
+    : configuredChains.filter(c => getRpcUrl(c));
 const CHAINS = SOURCE_CHAINS.map(c => ({
     key: c.key,
     display: c.display,

@@ -89,7 +89,8 @@ if (argv._[0] === 'list') {
     console.log('Available chain keys:');
     console.log(keys.join(', '));
     console.log('');
-    const firstConfigured = configuredChains()[0];
+    const chainsWithRpc = configuredChains.filter(c => getRpcUrl(c));
+    const firstConfigured = chainsWithRpc[0];
     if (firstConfigured) {
         const rpc = getRpcUrl(firstConfigured);
         const provider = new ethers.providers.JsonRpcProvider({ url: rpc, timeout: 600000 });
@@ -116,13 +117,14 @@ if (argv._[0] === 'list') {
 let SOURCE_CHAINS;
 if (argv.only) {
     const selectedKeys = argv.only.split(',').map(k => k.trim()).filter(Boolean);
-    SOURCE_CHAINS = getChainsByKeys(selectedKeys, { requireRpc: true });
+    const selectedChains = getChainsByKeys(selectedKeys);
+    SOURCE_CHAINS = selectedChains.filter(c => getRpcUrl(c));
     if (SOURCE_CHAINS.length === 0) {
         console.error(`No valid chains found for keys: ${selectedKeys.join(', ')}`);
         process.exit(1);
     }
 } else {
-    SOURCE_CHAINS = configuredChains();
+    SOURCE_CHAINS = configuredChains.filter(c => getRpcUrl(c));
 }
 
 const OVERRIDES = new Map([
@@ -231,9 +233,24 @@ const main = async () => {
     console.log(`${isDryRun ? '[DRY RUN] ' : ''}Preparing multi-chain ETH transfer (99% of wallet balance)\n`);
     const chains = buildPerChainConfig();
 
-    const firstProvider = new ethers.providers.JsonRpcProvider({ url: chains[0].rpc, timeout: 600000 });
-    const wallet0 = await getWalletForProvider(firstProvider);
-    console.log(`*******\nSender address: ${wallet0.address}\n*******`);
+    // Get wallet address from first available chain (try each until one works)
+    let senderAddress = null;
+    for (const chain of chains) {
+        try {
+            const testProvider = new ethers.providers.JsonRpcProvider({ url: chain.rpc, timeout: 600000 });
+            const testWallet = await getWalletForProvider(testProvider);
+            senderAddress = testWallet.address;
+            break;
+        } catch (e) {
+            console.warn(`Could not connect to ${chain.display}, trying next chain...`);
+        }
+    }
+    
+    if (!senderAddress) {
+        throw new Error('Could not connect to any chain to determine wallet address');
+    }
+    
+    console.log(`*******\nSender address: ${senderAddress}\n*******`);
 
     // Determine recipient from CLI arg or env var
     const defaultRecipient = argv.recipient || process.env.FUNDS_RECIPIENT || "";
@@ -241,38 +258,47 @@ const main = async () => {
         ? ethers.utils.getAddress(defaultRecipient)
         : askAddress("Recipient address", defaultRecipient);
 
-    // Gather per-chain info and compute planned send amounts
-    const plans = [];
-    for (const c of chains) {
-        const provider = new ethers.providers.JsonRpcProvider({ url: c.rpc, timeout: 600000 });
-        const wallet = await getWalletForProvider(provider);
-        const balance = await provider.getBalance(wallet.address);
-        const nonce = await provider.getTransactionCount(wallet.address, "pending");
-
-        // Target is 99% of balance, but must subtract fee; start with a placeholder value to estimate gas
-        const ninetyNinePct = balance.mul(99).div(100);
-
-        // We'll estimate gas with a tentative value; price affects only the fee cost
+    // Gather per-chain info and compute planned send amounts in parallel
+    const plans = await Promise.all(chains.map(async (c) => {
         try {
-            const feeEst = await estimateTxFee(provider, wallet.address, recipient, ninetyNinePct, c.gasOverrides || {});
+            const provider = new ethers.providers.JsonRpcProvider({ url: c.rpc, timeout: 600000 });
+            const wallet = await getWalletForProvider(provider);
+            
+            // Fetch balance and nonce in parallel
+            const [balance, nonce] = await Promise.all([
+                provider.getBalance(wallet.address),
+                provider.getTransactionCount(wallet.address, "pending")
+            ]);
 
-            // Compute final amount to send: 99% minus fee
-            let amountToSend = ninetyNinePct.sub(feeEst.cost);
-            if (amountToSend.lte(0)) amountToSend = ethers.BigNumber.from(0);
+            // Target is 99% of balance, but must subtract fee; start with a placeholder value to estimate gas
+            const ninetyNinePct = balance.mul(99).div(100);
 
-            plans.push({ chain: c, provider, wallet, balance, nonce, feeEst, amountToSend });
+            // Estimate gas with a tentative value
+            try {
+                const feeEst = await estimateTxFee(provider, wallet.address, recipient, ninetyNinePct, c.gasOverrides || {});
+
+                // Compute final amount to send: 99% minus fee
+                let amountToSend = ninetyNinePct.sub(feeEst.cost);
+                if (amountToSend.lte(0)) amountToSend = ethers.BigNumber.from(0);
+
+                return { chain: c, provider, wallet, balance, nonce, feeEst, amountToSend };
+            } catch (e) {
+                console.error(`Fee estimation failed on ${c.display} (${c.key}):`, e && e.message ? e.message : e);
+                return { chain: c, provider, wallet, balance, nonce, feeEst: null, amountToSend: ethers.BigNumber.from(0), error: e };
+            }
         } catch (e) {
-            console.error(`Fee estimation failed on ${c.display} (${c.key}):`, e && e.message ? e.message : e);
-            // Push a plan entry noting the error so we can summarize and optionally skip later
-            plans.push({ chain: c, provider, wallet, balance, nonce, feeEst: null, amountToSend: ethers.BigNumber.from(0), error: e });
+            console.error(`RPC error on ${c.display} (${c.key}):`, e && e.message ? e.message : e);
+            return { chain: c, provider: null, wallet: null, balance: ethers.BigNumber.from(0), nonce: 0, feeEst: null, amountToSend: ethers.BigNumber.from(0), error: e };
         }
-    }
+    }));
 
     console.log("Planned transfers:");
     for (const p of plans) {
         const { chain: c, amountToSend, nonce } = p;
         if (p.error) {
-            console.log(`[${c.display}] ERROR estimating fees: ${p.error && p.error.message ? p.error.message : p.error}`);
+            const errorMsg = p.error && p.error.message ? p.error.message : p.error;
+            const shortMsg = errorMsg.length > 100 ? errorMsg.substring(0, 100) + '...' : errorMsg;
+            console.log(`[${c.display}] ERROR: ${shortMsg}`);
             console.log(`  NONCE: ${nonce} -> ${nonce} (skipped)`);
         } else {
             console.log(`[${c.display}] ${utils.formatEther(amountToSend)} ${c.currency} ${p.wallet.address} -> ${recipient}`);
@@ -296,8 +322,10 @@ const main = async () => {
     for (const p of plans) {
         const { chain: c, provider, wallet, amountToSend } = p;
         try {
-            if (amountToSend.lte(0)) {
-                const reason = p.error ? `fee estimation error (${p.error && p.error.message ? p.error.message : p.error})` : "amount to send is 0 or insufficient after fees.";
+            if (p.error || !provider || !wallet || amountToSend.lte(0)) {
+                const reason = p.error 
+                    ? `RPC/estimation error`
+                    : "amount to send is 0 or insufficient after fees";
                 console.log(`Skipping ${c.display}: ${reason}`);
                 results.push({ c, txHash: null, skipped: true });
                 continue;
@@ -314,16 +342,25 @@ const main = async () => {
         }
     }
 
-    console.log("Summary:");
+    console.log("\nSummary:");
+    let successCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    
     for (const r of results) {
         if (r.skipped) {
             console.log(`- ${r.c.display}: skipped`);
+            skippedCount++;
         } else if (r.txHash) {
             console.log(`- ${r.c.display}: ${r.c.explorer}/tx/${r.txHash}`);
+            successCount++;
         } else {
             console.log(`- ${r.c.display}: FAILED`);
+            failedCount++;
         }
     }
+    
+    console.log(`\nTotal: ${results.length} chains | Success: ${successCount} | Skipped: ${skippedCount} | Failed: ${failedCount}`);
 };
 
 main();
