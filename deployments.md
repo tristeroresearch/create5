@@ -26,6 +26,7 @@ Ethereum | 1 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://etherscan.io
 Flare | 14 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://flare-explorer.flare.network/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Flow EVM | 747 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://flowscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Fraxtal Mainnet | 252 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://fraxscan.com/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
+Fuse | 122 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://explorer.fuse.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Gnosis | 100 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://gnosisscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 HyperEVM | 999 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://hyperevmscan.io/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
 Injective EVM | 2525 | [0x7000000db505d50f077492Efa36a8968ff7493dD](https://inevm.calderaexplorer.xyz/address/0x7000000db505d50f077492Efa36a8968ff7493dD)
