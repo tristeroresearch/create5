@@ -33,8 +33,33 @@ const OVERRIDES = new Map([
         maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
     }],
     ['gravity', {
-        maxFeePerGas: ethers.utils.parseUnits('1800', 'gwei'),
+        baseFee: ethers.utils.parseUnits('1800', 'gwei'),
+        maxFeePerGas: ethers.utils.parseUnits('2000', 'gwei'),
         maxPriorityFeePerGas: ethers.utils.parseUnits('2000', 'gwei'),
+    }],
+    ['dogechain', {
+        maxFeePerGas: ethers.utils.parseUnits('350', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('350', 'gwei'),
+    }],
+    ['zero_g', {
+        maxFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
+    }],
+    ['zkcandy', {
+        maxFeePerGas: ethers.utils.parseUnits('0.1', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('0.1', 'gwei'),
+    }],
+    ['fluence', {
+        maxFeePerGas: ethers.utils.parseUnits('0.1', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('0.1', 'gwei'),
+    }],
+    ['silicon', {
+        maxFeePerGas: ethers.utils.parseUnits('0.05', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('0.05', 'gwei'),
+    }],
+    ['bsquared_network', {
+        maxFeePerGas: ethers.utils.parseUnits('0.002', 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits('0.002', 'gwei'),
     }]
 ]);
 
