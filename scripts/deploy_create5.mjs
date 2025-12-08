@@ -22,46 +22,345 @@ const DEPLOYMENTS_MD = 'deployments.md';
 const DEPLOYMENTS_LOG = 'deployments.log';
 const CACHE_JSON = 'deployments.cache.json';
 
-const OVERRIDES = new Map([
-    ['polygon', {
-        maxFeePerGas: ethers.utils.parseUnits('70', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('35', 'gwei'),
+// Dynamic gas price estimation cache to avoid re-fetching for each deployment
+const DYNAMIC_GAS_CACHE = new Map();
+
+// Chain-specific gas overrides (initialized after argv is parsed)
+let CHAIN_GAS_OVERRIDES = new Map();
+
+// Parse chain-specific gas overrides from CLI (called after argv is available)
+function parseGasOverrides(argv) {
+    const overrides = new Map();
+    const args = argv['gas-override'];
+    
+    if (!args) return overrides;
+    
+    const argArray = Array.isArray(args) ? args : [args];
+    
+    for (const arg of argArray) {
+        // Format: chain:param:value
+        // Examples: core:priority-fee:60, gravity:max-fee:2000, avalanche:gas-price:100
+        const parts = arg.split(':');
+        if (parts.length !== 3) {
+            console.warn(`Invalid gas override format: ${arg}. Expected format: chain:param:value`);
+            continue;
+        }
+        
+        const [chain, param, value] = parts;
+        
+        if (!overrides.has(chain)) {
+            overrides.set(chain, {});
+        }
+        
+        const chainOverride = overrides.get(chain);
+        
+        switch (param) {
+            case 'gas-price':
+                chainOverride.gasPrice = ethers.utils.parseUnits(value, 'gwei');
+                break;
+            case 'max-fee':
+                chainOverride.maxFeePerGas = ethers.utils.parseUnits(value, 'gwei');
+                break;
+            case 'priority-fee':
+                chainOverride.maxPriorityFeePerGas = ethers.utils.parseUnits(value, 'gwei');
+                break;
+            default:
+                console.warn(`Unknown gas parameter: ${param}. Use: gas-price, max-fee, or priority-fee`);
+        }
     }
-    ],
-    ['ronin', {
-        maxFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
-    }],
-    ['gravity', {
-        baseFee: ethers.utils.parseUnits('1800', 'gwei'),
-        maxFeePerGas: ethers.utils.parseUnits('2000', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('2000', 'gwei'),
-    }],
-    ['dogechain', {
-        maxFeePerGas: ethers.utils.parseUnits('350', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('350', 'gwei'),
-    }],
-    ['zero_g', {
-        maxFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('30', 'gwei'),
-    }],
-    ['zkcandy', {
-        maxFeePerGas: ethers.utils.parseUnits('0.1', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('0.1', 'gwei'),
-    }],
-    ['fluence', {
-        maxFeePerGas: ethers.utils.parseUnits('0.1', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('0.1', 'gwei'),
-    }],
-    ['silicon', {
-        maxFeePerGas: ethers.utils.parseUnits('0.05', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('0.05', 'gwei'),
-    }],
-    ['bsquared_network', {
-        maxFeePerGas: ethers.utils.parseUnits('0.002', 'gwei'),
-        maxPriorityFeePerGas: ethers.utils.parseUnits('0.002', 'gwei'),
-    }]
-]);
+    
+    return overrides;
+}
+
+/**
+ * Estimate gas prices dynamically from recent transactions
+ * @param {ethers.providers.Provider} provider - The RPC provider
+ * @param {string} chainKey - The chain key for logging
+ * @returns {Promise<Object|null>} Gas price overrides or null if estimation fails
+ */
+async function estimateDynamicGasPrice(provider, chainKey) {
+    // Check for chain-specific CLI overrides first
+    if (CHAIN_GAS_OVERRIDES.has(chainKey)) {
+        const override = CHAIN_GAS_OVERRIDES.get(chainKey);
+        
+        // If only partial EIP-1559 params provided, fetch the missing ones
+        if ((override.maxFeePerGas || override.maxPriorityFeePerGas) && 
+            (!override.maxFeePerGas || !override.maxPriorityFeePerGas)) {
+            try {
+                const feeData = await provider.getFeeData();
+                if (!override.maxFeePerGas && feeData.maxFeePerGas) {
+                    override.maxFeePerGas = feeData.maxFeePerGas;
+                }
+                if (!override.maxPriorityFeePerGas && feeData.maxPriorityFeePerGas) {
+                    override.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+                }
+            } catch (e) {
+                // Ignore - use what we have
+            }
+        }
+        
+        const logData = {
+            level: 'info',
+            chain: chainKey,
+            msg: 'Using chain-specific CLI gas override',
+        };
+        
+        if (override.gasPrice) {
+            logData.gasPriceGwei = ethers.utils.formatUnits(override.gasPrice, 'gwei');
+        }
+        if (override.maxFeePerGas) {
+            logData.maxFeeGwei = ethers.utils.formatUnits(override.maxFeePerGas, 'gwei');
+        }
+        if (override.maxPriorityFeePerGas) {
+            logData.priorityFeeGwei = ethers.utils.formatUnits(override.maxPriorityFeePerGas, 'gwei');
+        }
+        
+        logLine(logData);
+        
+        DYNAMIC_GAS_CACHE.set(chainKey, override);
+        return override;
+    }
+    
+    // Check for global CLI overrides
+    const overrideForSet = parseListToSet(argv['override-gas-for']);
+    const shouldOverride = !overrideForSet || overrideForSet.size === 0 || overrideForSet.has(chainKey);
+    
+    if (shouldOverride && (argv['gas-price'] || argv['max-fee'] || argv['priority-fee'])) {
+        const override = {};
+        
+        if (argv['gas-price']) {
+            // Legacy transaction override
+            override.gasPrice = ethers.utils.parseUnits(argv['gas-price'], 'gwei');
+            
+            // Get current gas price for comparison
+            let currentGasPriceGwei = 'N/A';
+            try {
+                const currentGasPrice = await provider.getGasPrice();
+                if (currentGasPrice) {
+                    currentGasPriceGwei = ethers.utils.formatUnits(currentGasPrice, 'gwei');
+                }
+            } catch (e) {
+                // Current gas price not available
+            }
+            
+            logLine({
+                level: 'info',
+                chain: chainKey,
+                msg: 'Using global CLI gas price override (Legacy)',
+                currentGasPriceGwei,
+                overrideGasPriceGwei: argv['gas-price'],
+            });
+        } else if (argv['max-fee'] || argv['priority-fee']) {
+            // EIP-1559 transaction override
+            if (argv['max-fee']) {
+                override.maxFeePerGas = ethers.utils.parseUnits(argv['max-fee'], 'gwei');
+            }
+            if (argv['priority-fee']) {
+                override.maxPriorityFeePerGas = ethers.utils.parseUnits(argv['priority-fee'], 'gwei');
+            }
+            
+            // If only one value is provided, fetch the other from the provider
+            if (!argv['max-fee'] || !argv['priority-fee']) {
+                try {
+                    const feeData = await provider.getFeeData();
+                    if (!override.maxFeePerGas && feeData.maxFeePerGas) {
+                        override.maxFeePerGas = feeData.maxFeePerGas;
+                    }
+                    if (!override.maxPriorityFeePerGas && feeData.maxPriorityFeePerGas) {
+                        override.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+                    }
+                } catch (e) {
+                    logLine({
+                        level: 'warn',
+                        chain: chainKey,
+                        msg: 'Could not fetch missing EIP-1559 parameter from provider',
+                        error: e?.message || String(e),
+                    });
+                }
+            }
+            
+            // Get base fee for comparison
+            let baseFeeGwei = 'N/A';
+            try {
+                const latestBlock = await provider.getBlock('latest');
+                if (latestBlock && latestBlock.baseFeePerGas) {
+                    baseFeeGwei = ethers.utils.formatUnits(latestBlock.baseFeePerGas, 'gwei');
+                }
+            } catch (e) {
+                // Base fee not available
+            }
+            
+            logLine({
+                level: 'info',
+                chain: chainKey,
+                msg: 'Using global CLI gas price override (EIP-1559)',
+                baseFeeGwei,
+                overrideMaxFeeGwei: override.maxFeePerGas ? ethers.utils.formatUnits(override.maxFeePerGas, 'gwei') : 'auto',
+                overridePriorityFeeGwei: override.maxPriorityFeePerGas ? ethers.utils.formatUnits(override.maxPriorityFeePerGas, 'gwei') : 'auto',
+            });
+        }
+        
+        DYNAMIC_GAS_CACHE.set(chainKey, override);
+        return override;
+    }
+    
+    // Check cache first
+    if (DYNAMIC_GAS_CACHE.has(chainKey)) {
+        return DYNAMIC_GAS_CACHE.get(chainKey);
+    }
+
+    try {
+        // Get the latest block
+        const latestBlock = await provider.getBlock('latest');
+        if (!latestBlock) {
+            logLine({ level: 'warn', chain: chainKey, msg: 'Could not fetch latest block for gas estimation' });
+            return null;
+        }
+
+        // Fetch last 10 blocks to get transactions
+        const blockNumber = latestBlock.number;
+        const transactions = [];
+        
+        for (let i = 0; i < 10 && i < blockNumber; i++) {
+            try {
+                const block = await provider.getBlockWithTransactions(blockNumber - i);
+                if (block && block.transactions && block.transactions.length > 0) {
+                    // Take first transaction from each block to get a sample
+                    transactions.push(block.transactions[0]);
+                    if (transactions.length >= 10) break;
+                }
+            } catch (e) {
+                // Skip block if we can't fetch it
+                continue;
+            }
+        }
+
+        if (transactions.length === 0) {
+            logLine({ level: 'warn', chain: chainKey, msg: 'No transactions found in recent blocks for gas estimation' });
+            return null;
+        }
+
+        // Detect if chain supports EIP-1559 (maxFeePerGas and maxPriorityFeePerGas)
+        const supportsEip1559 = transactions.some(tx => 
+            tx.maxFeePerGas !== undefined && tx.maxFeePerGas !== null
+        );
+
+        if (supportsEip1559) {
+            // Extract EIP-1559 gas prices
+            const maxFees = [];
+            const priorityFees = [];
+            
+            for (const tx of transactions) {
+                if (tx.maxFeePerGas && tx.maxPriorityFeePerGas) {
+                    maxFees.push(ethers.BigNumber.from(tx.maxFeePerGas));
+                    priorityFees.push(ethers.BigNumber.from(tx.maxPriorityFeePerGas));
+                }
+            }
+
+            if (maxFees.length === 0) {
+                logLine({ level: 'warn', chain: chainKey, msg: 'No EIP-1559 transactions found despite support' });
+                return null;
+            }
+
+            // Calculate median
+            const sortedMaxFees = maxFees.sort((a, b) => a.gt(b) ? 1 : -1);
+            const sortedPriorityFees = priorityFees.sort((a, b) => a.gt(b) ? 1 : -1);
+            
+            const medianMaxFee = sortedMaxFees[Math.floor(sortedMaxFees.length / 2)];
+            const medianPriorityFee = sortedPriorityFees[Math.floor(sortedPriorityFees.length / 2)];
+
+            // Add 50% buffer to median
+            const bufferedMaxFee = medianMaxFee.mul(150).div(100);
+            const bufferedPriorityFee = medianPriorityFee.mul(150).div(100);
+
+            const result = {
+                maxFeePerGas: bufferedMaxFee,
+                maxPriorityFeePerGas: bufferedPriorityFee,
+            };
+
+            // Get base fee from latest block
+            let baseFeeGwei = 'N/A';
+            try {
+                const latestBlock = await provider.getBlock('latest');
+                if (latestBlock && latestBlock.baseFeePerGas) {
+                    baseFeeGwei = ethers.utils.formatUnits(latestBlock.baseFeePerGas, 'gwei');
+                }
+            } catch (e) {
+                // Base fee not available
+            }
+
+            logLine({ 
+                level: 'info', 
+                chain: chainKey, 
+                msg: 'Dynamic gas estimation (EIP-1559)',
+                baseFeeGwei,
+                medianMaxFeeGwei: ethers.utils.formatUnits(medianMaxFee, 'gwei'),
+                bufferedMaxFeeGwei: ethers.utils.formatUnits(bufferedMaxFee, 'gwei'),
+                medianPriorityFeeGwei: ethers.utils.formatUnits(medianPriorityFee, 'gwei'),
+                bufferedPriorityFeeGwei: ethers.utils.formatUnits(bufferedPriorityFee, 'gwei'),
+            });
+
+            DYNAMIC_GAS_CACHE.set(chainKey, result);
+            return result;
+        } else {
+            // Legacy transactions - use gasPrice only
+            const gasPrices = [];
+            
+            for (const tx of transactions) {
+                if (tx.gasPrice) {
+                    gasPrices.push(ethers.BigNumber.from(tx.gasPrice));
+                }
+            }
+
+            if (gasPrices.length === 0) {
+                logLine({ level: 'warn', chain: chainKey, msg: 'No legacy gas prices found in transactions' });
+                return null;
+            }
+
+            // Calculate median
+            const sortedGasPrices = gasPrices.sort((a, b) => a.gt(b) ? 1 : -1);
+            const medianGasPrice = sortedGasPrices[Math.floor(sortedGasPrices.length / 2)];
+
+            // Add 50% buffer to median
+            const bufferedGasPrice = medianGasPrice.mul(150).div(100);
+
+            const result = {
+                gasPrice: bufferedGasPrice,
+            };
+
+            // Get current gas price from provider for comparison
+            let currentGasPriceGwei = 'N/A';
+            try {
+                const currentGasPrice = await provider.getGasPrice();
+                if (currentGasPrice) {
+                    currentGasPriceGwei = ethers.utils.formatUnits(currentGasPrice, 'gwei');
+                }
+            } catch (e) {
+                // Current gas price not available
+            }
+
+            logLine({ 
+                level: 'info', 
+                chain: chainKey, 
+                msg: 'Dynamic gas estimation (Legacy)',
+                currentGasPriceGwei,
+                medianGasPriceGwei: ethers.utils.formatUnits(medianGasPrice, 'gwei'),
+                bufferedGasPriceGwei: ethers.utils.formatUnits(bufferedGasPrice, 'gwei'),
+            });
+
+            DYNAMIC_GAS_CACHE.set(chainKey, result);
+            return result;
+        }
+    } catch (error) {
+        logLine({ 
+            level: 'error', 
+            chain: chainKey, 
+            msg: 'Failed to estimate dynamic gas prices',
+            error: error?.message || String(error) 
+        });
+        return null;
+    }
+}
 
 // Source chain for funding outbound gas and for receiving refunds
 const SOURCE_CHAIN_KEY = 'arbitrum_one';
@@ -80,9 +379,17 @@ const argv = yargs(hideBin(process.argv))
     .option('dry-run', { type: 'boolean', default: false, describe: 'Simulate on destination chains only: do not send any tx, just estimate costs and report if balance is sufficient' })
     .option('deploy-without-test', { type: 'boolean', default: false, describe: 'Allow deployment without the preliminary test tx (use only if nonce is already 1)' })
     .option('deploy-without-test-for', { type: 'string', describe: 'Comma-separated chain keys to deploy without test tx (overrides nonce guard for these chains)' })
+    .option('gas-price', { type: 'string', describe: 'Override gas price in Gwei (for legacy transactions, applies globally)' })
+    .option('max-fee', { type: 'string', describe: 'Override maxFeePerGas in Gwei (for EIP-1559 transactions, applies globally)' })
+    .option('priority-fee', { type: 'string', describe: 'Override maxPriorityFeePerGas in Gwei (for EIP-1559 transactions, applies globally)' })
+    .option('override-gas-for', { type: 'string', describe: 'Comma-separated chain keys to apply global gas overrides to (if not specified, applies to all chains)' })
+    .option('gas-override', { type: 'string', describe: 'Chain-specific gas override. Format: chain:param:value (e.g., core:priority-fee:60). Can be repeated for multiple chains/params.' })
     .alias('h', 'help')
     .help()
     .parseSync();
+
+// Initialize chain-specific gas overrides after argv is available
+CHAIN_GAS_OVERRIDES = parseGasOverrides(argv);
 
 function parseListToSet(val) {
     if (!val) return null;
@@ -146,7 +453,14 @@ function appendDeploymentRow(display, chainId, explorer, address) {
 
 function logLine(obj) {
     const ts = new Date().toISOString();
-    const line = `[${ts}] ${typeof obj === 'string' ? obj : JSON.stringify(obj)}`;
+    let content;
+    if (typeof obj === 'string') {
+        content = obj;
+    } else {
+        // Pretty-print JSON with 2-space indentation
+        content = JSON.stringify(obj, null, 2);
+    }
+    const line = `[${ts}] ${content}`;
     // Write to log file
     fs.appendFileSync(DEPLOYMENTS_LOG, `${line}\n`);
     // Echo to console as well
@@ -220,7 +534,7 @@ function configuredChainsStrict() {
         chainId: c.chainId,
         rpc: getRpcUrl(c),
         explorer: getExplorerUrl(c),
-        gasOverrides: OVERRIDES.get(c.key) || {},
+        gasOverrides: {}, // Will be populated dynamically
     })).filter(c => !!c.rpc);
 }
 
@@ -236,7 +550,7 @@ function getChainByKeyStrict(key) {
         chainId: c.chainId,
         rpc,
         explorer: getExplorerUrl(c),
-        gasOverrides: OVERRIDES.get(c.key) || {},
+        gasOverrides: {}, // Will be populated dynamically
     };
 }
 
@@ -415,6 +729,21 @@ async function estimateTxFee(provider, from, to, valueWei, overrides = {}, hyper
 async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     const provider = new ethers.providers.JsonRpcProvider({ url: chain.rpc, timeout: 600000 });
     const wallet = await getWalletForProvider(provider);
+    
+    // Estimate dynamic gas prices
+    const dynamicGas = await estimateDynamicGasPrice(provider, chain.key);
+    if (!dynamicGas) {
+        logLine({ 
+            level: 'warn', 
+            chain: chain.key, 
+            msg: 'Skipping chain: unable to estimate gas prices from recent transactions' 
+        });
+        return { skipped: true };
+    }
+    
+    // Update chain's gas overrides with dynamic estimation
+    chain.gasOverrides = dynamicGas;
+    
     const nonce = await provider.getTransactionCount(wallet.address, 'pending');
     const isHyper = chain.key === 'hyperevm';
     const isDry = !!argv['dry-run'];
@@ -680,6 +1009,15 @@ async function main() {
     const shouldDoSource = !skipSource && !argv['dry-run'] && (!onlySet || onlySet.size === 0 || onlySet.has(sourceChain.key));
     if (shouldDoSource) {
         logLine({ level: 'info', step: 'deploy_source_start', chain: sourceChain.key, address: sourceWallet.address });
+        
+        // Estimate dynamic gas prices for source chain
+        const srcDynamicGas = await estimateDynamicGasPrice(sourceProvider, sourceChain.key);
+        if (srcDynamicGas) {
+            sourceChain.gasOverrides = srcDynamicGas;
+        } else {
+            logLine({ level: 'warn', chain: sourceChain.key, msg: 'Could not estimate dynamic gas for source chain, proceeding with provider defaults' });
+        }
+        
         const srcNonce = await sourceProvider.getTransactionCount(sourceWallet.address, 'pending');
         if (srcNonce !== 0) {
             logLine({ level: 'warn', chain: sourceChain.key, msg: `Source nonce is ${srcNonce}. Will still attempt test->deploy sequence but vanity may not match.` });
