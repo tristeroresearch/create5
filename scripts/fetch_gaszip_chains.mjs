@@ -1,26 +1,69 @@
 #!/usr/bin/env node
 /*
 Fetch chains from https://backend.gas.zip/v2/chains and output
-ready-to-paste entries for scripts/chains.mjs `chainConfig`.
+ready-to-paste entries for chainconfig/chains.mjs `chainConfig`.
 
 Usage:
-  node scripts/fetch_gaszip_chains.mjs            # prints new entries
-  CHAINS_INCLUDE_TESTNETS=1 node scripts/fetch_gaszip_chains.mjs # include testnets
-
-Notes:
-- By default only mainnet chains are included (mainnet === true)
-- Existing chains in scripts/chains.mjs are skipped (matching by key or chainId)
+  node scripts/fetch_gaszip_chains.mjs --help
+  node scripts/fetch_gaszip_chains.mjs --include-testnets
+  node scripts/fetch_gaszip_chains.mjs --output chains-gaszip.mjs
 */
 
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import fs from 'node:fs/promises';
+import yargs from 'yargs';
+import { hideBin } from 'yargs/helpers';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const CHAINS_FILE = path.resolve(__dirname, './chains.mjs');
+const CHAINS_FILE = path.resolve(__dirname, '../chainconfig/chains.mjs');
 const GASZIP_URL = 'https://backend.gas.zip/v2/chains';
+
+/**
+ * Validates and completes a chain object with all required schema fields
+ */
+function validateAndCompleteChain(chain) {
+    const zeroAddr = '0x0000000000000000000000000000000000000000';
+    
+    return {
+        key: chain.key || 'unknown',
+        display: chain.display || chain.name || 'Unknown',
+        currency: chain.currency || chain.symbol || 'ETH',
+        vmType: chain.vmType || 'EVM',
+        chainId: chain.chainId,
+        lzSrcId: chain.lzSrcId || 0,
+        cgPlatformId: chain.cgPlatformId || null,
+        cgGasAssetId: chain.cgGasAssetId || null,
+        openOceanSupported: chain.openOceanSupported || false,
+        openOceanChainCode: chain.openOceanChainCode || '',
+        openOceanNativeAddress: chain.openOceanNativeAddress || zeroAddr,
+        explorerUrls: Array.isArray(chain.explorerUrls) && chain.explorerUrls.length > 0
+            ? chain.explorerUrls
+            : (chain.explorerUrl ? [chain.explorerUrl] : ['']),
+        defaultExplorerUrlIndex: chain.defaultExplorerUrlIndex || 0,
+        rpcUrls: Array.isArray(chain.rpcUrls) && chain.rpcUrls.length > 0
+            ? chain.rpcUrls
+            : [],
+        defaultRpcUrlIndex: chain.defaultRpcUrlIndex || 0,
+        addresses: {
+            gasToken: chain.addresses?.gasToken || zeroAddr,
+            wrappedGasToken: chain.addresses?.wrappedGasToken || zeroAddr,
+            usdc: chain.addresses?.usdc || zeroAddr,
+            usdt: chain.addresses?.usdt || zeroAddr,
+            permit2: chain.addresses?.permit2 || zeroAddr,
+            entryPoint: chain.addresses?.entryPoint || zeroAddr,
+            trustedForwarder: chain.addresses?.trustedForwarder || zeroAddr,
+            relayRouter: chain.addresses?.relayRouter || zeroAddr,
+            messageTransmitter: chain.addresses?.messageTransmitter || zeroAddr,
+            tokenMessenger: chain.addresses?.tokenMessenger || zeroAddr,
+            create5: chain.addresses?.create5 || zeroAddr,
+            multicall3: chain.addresses?.multicall3 || zeroAddr,
+            ...(chain.addresses || {}),
+        },
+    };
+}
 
 function slugifyNameToKey(name) {
     if (!name) return null;
@@ -37,29 +80,64 @@ function zeroAddr() {
     return '0x0000000000000000000000000000000000000000';
 }
 
-function formatChainEntry({ key, name, symbol, chainId, explorerUrl, rpcUrls }) {
-    const entry = `    ${key}: {
-        key: '${key}',
-        display: '${name}',
-        currency: '${symbol || 'ETH'}',
-        chainId: ${chainId},
-        lzSrcId: undefined,
-        explorerUrl: '${explorerUrl || ''}',
-        rpcUrls: [
-${(rpcUrls || []).map(u => `            '${u}'`).join(',\n')}
-        ],
-        defaultRpcUrlIndex: 0,
-        addresses: {
-            tokenMessenger: '${zeroAddr()}',
-            messageTransmitter: '${zeroAddr()}',
-            usdc: '${zeroAddr()}',
-            permit2: '${zeroAddr()}',
-            entryPoint: '${zeroAddr()}', // 0x4337 not deployed (verify before using)
-            trustedForwarder: '${zeroAddr()}',
-            multicall: '${zeroAddr()}',
-        },
-    },`;
-    return entry;
+function formatChainEntry(chain) {
+    const indent = '    ';
+    const lines = [
+        `${indent}${chain.key}: {`,
+        `${indent}    key: "${chain.key}",`,
+        `${indent}    display: "${chain.display}",`,
+        `${indent}    currency: "${chain.currency}",`,
+        `${indent}    vmType: "${chain.vmType}",`,
+        `${indent}    chainId: ${chain.chainId},`,
+        `${indent}    lzSrcId: ${chain.lzSrcId},`,
+        `${indent}    cgPlatformId: ${chain.cgPlatformId === null ? 'null' : `"${chain.cgPlatformId}"`},`,
+        `${indent}    cgGasAssetId: ${chain.cgGasAssetId === null ? 'null' : `"${chain.cgGasAssetId}"`},`,
+        `${indent}    openOceanSupported: ${chain.openOceanSupported},`,
+        `${indent}    openOceanChainCode: "${chain.openOceanChainCode}",`,
+        `${indent}    openOceanNativeAddress: "${chain.openOceanNativeAddress}",`,
+        `${indent}    explorerUrls: [`,
+    ];
+    
+    for (const url of chain.explorerUrls) {
+        lines.push(`${indent}        "${url}",`);
+    }
+    
+    lines.push(`${indent}    ],`);
+    lines.push(`${indent}    defaultExplorerUrlIndex: ${chain.defaultExplorerUrlIndex},`);
+    lines.push(`${indent}    rpcUrls: [`);
+    
+    for (const url of chain.rpcUrls) {
+        lines.push(`${indent}        "${url}",`);
+    }
+    
+    lines.push(`${indent}    ],`);
+    lines.push(`${indent}    defaultRpcUrlIndex: ${chain.defaultRpcUrlIndex},`);
+    lines.push(`${indent}    addresses: {`);
+    
+    // Standard address fields in order
+    const standardFields = [
+        'gasToken', 'wrappedGasToken', 'usdc', 'usdt',
+        'permit2', 'entryPoint', 'trustedForwarder', 'relayRouter',
+        'messageTransmitter', 'tokenMessenger', 'create5', 'multicall3'
+    ];
+    
+    for (const field of standardFields) {
+        if (chain.addresses[field]) {
+            lines.push(`${indent}        ${field}: "${chain.addresses[field]}",`);
+        }
+    }
+    
+    // Add any custom address fields
+    for (const [key, value] of Object.entries(chain.addresses)) {
+        if (!standardFields.includes(key)) {
+            lines.push(`${indent}        ${key}: "${value}",`);
+        }
+    }
+    
+    lines.push(`${indent}    },`);
+    lines.push(`${indent}},`);
+    
+    return lines.join('\n');
 }
 
 async function loadExistingChains() {
@@ -107,48 +185,109 @@ function ensureUniqueKey(desiredKey, existingKeys) {
 }
 
 (async function main() {
+    const argv = yargs(hideBin(process.argv))
+        .option('include-testnets', {
+            alias: 't',
+            type: 'boolean',
+            description: 'Include testnet chains',
+            default: false,
+        })
+        .option('output', {
+            alias: 'o',
+            type: 'string',
+            description: 'Output filename (default: print to console)',
+        })
+        .option('merge', {
+            alias: 'm',
+            type: 'boolean',
+            description: 'Merge with existing chains and save to output file',
+            default: false,
+        })
+        .help()
+        .alias('help', 'h')
+        .argv;
+
     try {
-        const includeTestnets = !!process.env.CHAINS_INCLUDE_TESTNETS;
+        console.log('='.repeat(80));
+        console.log('GAS.ZIP CHAIN FETCHER');
+        console.log('='.repeat(80));
+        console.log('');
+
         const [{ keys: existingKeys, chainIds: existingChainIds }, apiChains] = await Promise.all([
             loadExistingChains(),
             fetchGasZipChains(),
         ]);
 
+        console.log(`Loaded ${existingKeys.size} existing chains`);
+        console.log(`Fetched ${apiChains.length} chains from gas.zip\n`);
+
         const filtered = apiChains
-            .filter(c => includeTestnets ? true : !!c.mainnet)
+            .filter(c => argv.includeTestnets ? true : !!c.mainnet)
             .map(c => {
                 const key0 = slugifyNameToKey(c.name);
                 const key = ensureUniqueKey(key0, existingKeys);
-                return {
+                
+                // Build chain object from gas.zip data
+                const chainData = {
                     key,
+                    display: c.name,
                     name: c.name,
+                    currency: c.symbol,
                     symbol: c.symbol,
                     chainId: c.chain,
                     explorerUrl: normalizeExplorer(c.explorer),
+                    explorerUrls: c.explorer ? [normalizeExplorer(c.explorer)] : [],
                     rpcUrls: Array.isArray(c.rpcs) ? c.rpcs : [],
                     mainnet: !!c.mainnet,
                 };
+                
+                // Validate and complete with full schema
+                return validateAndCompleteChain(chainData);
             })
             // skip obviously incomplete records
-            .filter(c => c.name && c.chainId && c.rpcUrls.length > 0)
+            .filter(c => c.display && c.chainId && c.rpcUrls.length > 0)
             // skip ones already present by key or chainId
             .filter(c => !(existingKeys.has(c.key) || existingChainIds.has(c.chainId)));
 
         if (filtered.length === 0) {
-            console.log('No new chains to add.');
+            console.log('✓ No new chains to add.\n');
             return;
         }
 
         // Sort by name for stable output
-        filtered.sort((a, b) => a.name.localeCompare(b.name));
+        filtered.sort((a, b) => a.display.localeCompare(b.display));
 
-        console.log('// Paste the following entries inside export const chainConfig = { ... }');
-        console.log('// --- BEGIN GENERATED ENTRIES FROM gas.zip ---');
-        console.log(filtered.map(formatChainEntry).join('\n\n'));
-        console.log('// --- END GENERATED ENTRIES FROM gas.zip ---');
+        console.log(`Found ${filtered.length} new chains:\n`);
+        filtered.forEach(c => console.log(`  - ${c.display} (chainId: ${c.chainId})`));
+        console.log('');
+
+        const outputLines = [
+            '// Auto-generated chain entries from gas.zip',
+            `// Generated on ${new Date().toISOString()}`,
+            '// Paste the following entries inside export const chainConfig = { ... }',
+            '',
+            '// --- BEGIN GENERATED ENTRIES FROM gas.zip ---',
+            '',
+            ...filtered.map(formatChainEntry),
+            '',
+            '// --- END GENERATED ENTRIES FROM gas.zip ---',
+        ];
+
+        if (argv.output) {
+            const outputPath = path.resolve(process.cwd(), argv.output);
+            await fs.writeFile(outputPath, outputLines.join('\n'), 'utf-8');
+            console.log(`✓ Output saved to: ${outputPath}\n`);
+        } else {
+            console.log(outputLines.join('\n'));
+        }
+
+        console.log('='.repeat(80));
+        console.log('✓ Complete!');
+        console.log('='.repeat(80));
 
     } catch (err) {
-        console.error('Error:', err.message || err);
+        console.error('\n✗ Error:', err.message || err);
+        console.error(err.stack);
         process.exitCode = 1;
     }
 })();

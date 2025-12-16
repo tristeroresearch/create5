@@ -415,7 +415,7 @@ async function listInfo() {
 // ---------- Files helpers ----------
 function ensureFiles() {
     if (!fs.existsSync(DEPLOYMENTS_MD)) {
-        fs.writeFileSync(DEPLOYMENTS_MD, 'display name | chainId | deployed address\n', 'utf8');
+        fs.writeFileSync(DEPLOYMENTS_MD, 'Chain | Chain ID | Address | Tx\n --- | --- | --- | ---\n', 'utf8');
     }
     if (!fs.existsSync(DEPLOYMENTS_LOG)) {
         fs.writeFileSync(DEPLOYMENTS_LOG, '', 'utf8');
@@ -425,10 +425,11 @@ function ensureFiles() {
     }
 }
 
-function appendDeploymentRow(display, chainId, explorer, address) {
+function appendDeploymentRow(display, chainId, explorer, address, txHash = null) {
     const link = `${explorer.replace(/\/$/, '')}/address/${address}`;
     const mdLink = `[${address}](${link})`;
-    const newRow = `${display} | ${chainId} | ${mdLink}`;
+    const txLink = txHash ? `[tx](${explorer.replace(/\/$/, '')}/tx/${txHash})` : '';
+    const newRow = `${display} | ${chainId} | ${mdLink} | ${txLink}`;
 
     // Read existing file
     const content = fs.readFileSync(DEPLOYMENTS_MD, 'utf8');
@@ -907,7 +908,7 @@ async function deployOnChain(chain, gasZipPricesMap, sourceCtx) {
     const deployCostWei = deployRcpt.gasUsed.mul(gasPriceUsed);
     logLine({ level: 'info', action: 'deploy', chain: chain.key, address: contract.address, link: `${chain.explorer}/address/${contract.address}`, tx: deployRcpt.transactionHash, txLink: `${chain.explorer}/tx/${deployRcpt.transactionHash}`, gasUsed: deployRcpt.gasUsed.toString(), costEth: formatEth(deployCostWei), costUsd: priceInfo?.price ? (Number(formatEth(deployCostWei)) * priceInfo.price).toFixed(6) : 'N/A' });
 
-    appendDeploymentRow(chain.display, chain.chainId, chain.explorer, contract.address);
+    appendDeploymentRow(chain.display, chain.chainId, chain.explorer, contract.address, deployRcpt.transactionHash);
 
     // Cache (include gas stats)
     const cache = readCache();
@@ -1040,7 +1041,7 @@ async function main() {
         const srcCostWei = srcRcpt.gasUsed.mul(srcRcpt.effectiveGasPrice || estSrc.price);
         logLine({ level: 'info', action: 'deploy', chain: sourceChain.key, address: contractSrc.address, link: `${sourceChain.explorer}/address/${contractSrc.address}`, tx: srcRcpt.transactionHash, txLink: `${sourceChain.explorer}/tx/${srcRcpt.transactionHash}`, gasUsed: srcRcpt.gasUsed.toString(), costEth: formatEth(srcCostWei), costUsd: (Number(formatEth(srcCostWei)) * (srcPrice?.price || 0)).toFixed(6) });
 
-        appendDeploymentRow(sourceChain.display, sourceChain.chainId, sourceChain.explorer, contractSrc.address);
+        appendDeploymentRow(sourceChain.display, sourceChain.chainId, sourceChain.explorer, contractSrc.address, srcRcpt.transactionHash);
         const cache0 = readCache();
         const costEthSrcStr = formatEth(srcCostWei);
         const costUsdSrcStr = (Number(costEthSrcStr) * (srcPrice?.price || 0)).toFixed(6);
